@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from typing import Any
 
 import duckdb
 
@@ -48,3 +49,9 @@ def connection(
         yield con
     finally:
         con.close()
+
+
+def scalar(con: duckdb.DuckDBPyConnection, sql: str) -> Any:
+    """Exécute `sql` et renvoie la 1re colonne de la 1re ligne (ou `None` si vide)."""
+    row = con.execute(sql).fetchone()
+    return row[0] if row is not None else None
