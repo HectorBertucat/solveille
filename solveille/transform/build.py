@@ -18,8 +18,8 @@ def main() -> None:
     staging.build_rga()
     commune_rga.build_commune_rga()
     staging.build_commune_bascule()
-    # À venir (v0) : commune_logement, epci_stock, downscale_fideli,
-    # commune_dvf, mart commune_pression.
+    staging.build_commune_logement()
+    # À venir (v0) : epci_stock, downscale_fideli, commune_dvf, mart commune_pression.
     log.info("build.done")
 
 

@@ -12,7 +12,7 @@ from pathlib import Path
 import duckdb
 
 from solveille.common import duckdb_io
-from solveille.common.archive import extract_7z
+from solveille.common.archive import extract_7z, extract_zip
 from solveille.common.config import get_settings
 from solveille.common.logging import get_logger
 
@@ -24,6 +24,16 @@ ADMIN_EXPRESS_LAYER = "commune"
 SOURCE_RGA = "rga_2026"
 #: Répertoire brut de la source « communes basculées 2026 ».
 SOURCE_BASCULE = "communes_bascule"
+#: Répertoire brut de la source INSEE logement.
+SOURCE_INSEE = "insee_logement"
+
+# Codes d'arrondissements municipaux (Paris/Lyon/Marseille) à exclure pour éviter le
+# double comptage avec la commune entière (75056 / 69123 / 13055).
+_PLM_ARRONDISSEMENTS_FILTER = (
+    "CODGEO NOT BETWEEN '75101' AND '75120' "
+    "AND CODGEO NOT BETWEEN '69381' AND '69389' "
+    "AND CODGEO NOT BETWEEN '13201' AND '13216'"
+)
 
 
 def _find_or_extract_admin_express_gpkg() -> Path:
@@ -189,4 +199,55 @@ def build_commune_bascule(
         if own:
             con.close()
     log.info("staging.commune_bascule", path=str(out), n_communes=n)
+    return out
+
+
+def build_commune_logement(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    zip_path: Path | None = None,
+    csv: Path | None = None,
+    out: Path | None = None,
+) -> Path:
+    """Construit `data/staging/commune_logement.parquet` (parc de maisons par commune).
+
+    Décompresse le CSV INSEE (`;`, UTF-8), garde `P22_MAISON/APPART/LOG` (DOUBLE, valeurs
+    estimées par sondage), exclut les arrondissements municipaux PLM (anti double-comptage).
+    `csv` (chemin direct) court-circuite la décompression — utile pour les tests offline.
+    """
+    s = get_settings()
+    if csv is None:
+        if zip_path is None:
+            zips = sorted(s.source_raw_dir(SOURCE_INSEE).rglob("*.zip"))
+            if not zips:
+                raise FileNotFoundError("Zip INSEE absent — lance d'abord `make fetch-insee`.")
+            zip_path = zips[-1]
+        members = extract_zip(zip_path, s.staging_dir / SOURCE_INSEE, suffixes=(".csv",))
+        csv = max(
+            (m for m in members if "meta" not in m.name.lower()), key=lambda m: m.stat().st_size
+        )
+    data_csv = csv
+    out = out or (s.staging_dir / "commune_logement.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT CODGEO::VARCHAR                  AS code_insee,
+                     TRY_CAST(P22_MAISON AS DOUBLE)   AS n_maisons,
+                     TRY_CAST(P22_APPART AS DOUBLE)   AS n_appart,
+                     TRY_CAST(P22_LOG AS DOUBLE)      AS n_logements
+              FROM read_csv('{data_csv}', delim = ';', header = true, all_varchar = true)
+              WHERE {_PLM_ARRONDISSEMENTS_FILTER}
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        n = duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{out}')")
+    finally:
+        if own:
+            con.close()
+    log.info("staging.commune_logement", path=str(out), n_communes=n)
     return out

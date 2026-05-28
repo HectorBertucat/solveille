@@ -1,7 +1,8 @@
-"""Décompression d'archives `.7z` (ADMIN EXPRESS) — extraction sélective de membres."""
+"""Décompression d'archives (`.7z` ADMIN EXPRESS, `.zip` INSEE) — extraction sélective."""
 
 from __future__ import annotations
 
+import zipfile
 from pathlib import Path
 
 import py7zr
@@ -32,4 +33,31 @@ def extract_7z(
         if not targets:
             raise FileNotFoundError(f"Aucun membre {suffixes} dans {archive}")
         z.extract(path=dest_dir, targets=targets)
+    return [dest_dir / t for t in targets]
+
+
+def extract_zip(
+    archive: Path | str,
+    dest_dir: Path | str,
+    *,
+    suffixes: tuple[str, ...] | None = None,
+) -> list[Path]:
+    """Extrait (sélectivement) les membres d'un `.zip` vers `dest_dir`.
+
+    `suffixes` (ex. `(".csv",)`) filtre les membres. Retourne les chemins extraits.
+    """
+    archive = Path(archive)
+    dest_dir = Path(dest_dir)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    with zipfile.ZipFile(archive) as z:
+        names = z.namelist()
+        if suffixes:
+            wanted = tuple(s.lower() for s in suffixes)
+            targets = [n for n in names if n.lower().endswith(wanted)]
+        else:
+            targets = list(names)
+        if not targets:
+            raise FileNotFoundError(f"Aucun membre {suffixes} dans {archive}")
+        for t in targets:
+            z.extract(t, path=dest_dir)
     return [dest_dir / t for t in targets]
