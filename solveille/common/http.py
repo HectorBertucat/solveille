@@ -132,6 +132,7 @@ def download(
     *,
     headers: dict[str, str] | None = None,
     conditional: bool = True,
+    allow_missing: bool = False,
     client: httpx.Client | None = None,
     max_retries: int | None = None,
     base_delay: float | None = None,
@@ -189,6 +190,9 @@ def download(
                         )
                         _backoff_sleep(attempt, delay, resp)
                         continue
+                    if allow_missing and resp.status_code == 404:
+                        log.info("http.missing", url=url)
+                        return DownloadResult(url, Path(dest), "missing")
                     resp.raise_for_status()
                     tmp = dest.with_name(dest.name + ".part")
                     digest = hashlib.sha256()
