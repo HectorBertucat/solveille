@@ -1,0 +1,4 @@
+code_insee,slug,nom_commune,code_departement,nom_departement,rga_classe_2020,rga_classe_2026,bascule_type
+01053,bourg-en-bresse,Bourg-en-Bresse,01,Ain,1,2,faible_vers_moyenne
+2A004,ajaccio,Ajaccio,2A,Corse-du-Sud,2,3,moyenne_vers_forte
+31555,toulouse,Toulouse,31,Haute-Garonne,2,3,moyenne_vers_forte

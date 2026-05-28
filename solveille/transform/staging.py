@@ -22,6 +22,8 @@ log = get_logger("solveille.transform.staging")
 ADMIN_EXPRESS_LAYER = "commune"
 #: Répertoire brut de la source RGA 2026.
 SOURCE_RGA = "rga_2026"
+#: Répertoire brut de la source « communes basculées 2026 ».
+SOURCE_BASCULE = "communes_bascule"
 
 
 def _find_or_extract_admin_express_gpkg() -> Path:
@@ -144,4 +146,47 @@ def build_rga(
         if own:
             con.close()
     log.info("staging.rga", path=str(out), n_features=n, n_files=len(files))
+    return out
+
+
+def build_commune_bascule(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    csv: Path | None = None,
+    out: Path | None = None,
+) -> Path:
+    """Construit `data/staging/commune_bascule.parquet` (flag reclassement 2026).
+
+    Le fichier ne liste que les communes **qui changent** de classe → `basculement_2026`
+    vaut TRUE pour toutes les lignes. `code_insee` conservé en VARCHAR (zéros, Corse).
+    """
+    s = get_settings()
+    if csv is None:
+        candidates = sorted(s.source_raw_dir(SOURCE_BASCULE).glob("*.csv"))
+        if not candidates:
+            raise FileNotFoundError("CSV bascule absent — lance d'abord `make fetch-bascule`.")
+        csv = candidates[-1]
+    out = out or (s.staging_dir / "commune_bascule.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT code_insee::VARCHAR                    AS code_insee,
+                     TRY_CAST(rga_classe_2020 AS INTEGER)   AS rga_classe_2020,
+                     TRY_CAST(rga_classe_2026 AS INTEGER)   AS rga_classe_2026,
+                     bascule_type::VARCHAR                  AS bascule_type,
+                     TRUE                                   AS basculement_2026
+              FROM read_csv('{csv}', header = true, all_varchar = true)
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        n = duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{out}')")
+    finally:
+        if own:
+            con.close()
+    log.info("staging.commune_bascule", path=str(out), n_communes=n)
     return out

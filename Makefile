@@ -2,8 +2,9 @@
 # Les cibles `fetch-*`, `build`, `tiles`, `api` appellent le package Python à créer (voir docs/architecture.md).
 # Ce fichier est un CONTRAT d'interface : Claude Code implémente les modules derrière.
 
-.PHONY: setup lint test fetch-all build tiles api clean \
-        fetch-communes fetch-rga fetch-swi fetch-piezo fetch-gaspar fetch-dvf fetch-fideli
+.PHONY: setup lint test fetch-all fetch-v0 build tiles api clean \
+        fetch-communes fetch-rga fetch-bascule fetch-insee \
+        fetch-swi fetch-piezo fetch-gaspar fetch-dvf fetch-fideli
 
 setup:        ## venv + deps + extensions DuckDB
 	uv sync --extra dev
@@ -18,11 +19,15 @@ test:         ## pytest
 # --- Ingestion (1 cible par source) ---
 fetch-communes: ; uv run python -m solveille.ingest.admin_express
 fetch-rga:      ; uv run python -m solveille.ingest.rga_2026
+fetch-bascule:  ; uv run python -m solveille.ingest.communes_bascule
+fetch-insee:    ; uv run python -m solveille.ingest.insee_logement
 fetch-fideli:   ; uv run python -m solveille.ingest.fideli_epci
 fetch-dvf:      ; uv run python -m solveille.ingest.dvf
 fetch-swi:      ; uv run python -m solveille.ingest.swi_catnat
 fetch-piezo:    ; uv run python -m solveille.ingest.hubeau_piezo
 fetch-gaspar:   ; uv run python -m solveille.ingest.gaspar
+# v0 « carte de l'enjeu » (statique, sans la dynamique météo/nappes)
+fetch-v0: fetch-communes fetch-rga fetch-bascule fetch-insee fetch-fideli fetch-dvf
 fetch-all: fetch-communes fetch-rga fetch-fideli fetch-dvf fetch-swi fetch-piezo fetch-gaspar
 
 build:        ## transformations DuckDB + calcul du mart commune_pression
