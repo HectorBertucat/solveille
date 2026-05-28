@@ -8,8 +8,10 @@ et l'extraction de la couche COMMUNE vivent dans `transform/`.
 
 from __future__ import annotations
 
+import hashlib
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
+from pathlib import Path
 
 from solveille.common import http
 from solveille.common.config import get_settings
@@ -40,6 +42,14 @@ class AdminExpressResource:
     download_url: str
     length: int | None
     md5: str | None
+
+
+def _md5_file(path: Path, chunk: int = 1 << 20) -> str:
+    h = hashlib.md5()
+    with path.open("rb") as fh:
+        for block in iter(lambda: fh.read(chunk), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def _feed_url(page: int) -> str:
@@ -118,10 +128,24 @@ def fetch() -> RawDataset:
         url=res.download_url,
         length=res.length,
     )
-    result = http.download(res.download_url, dest)
-    log.info(
-        "admin_express.download", status=result.status, bytes=result.n_bytes, sha256=result.sha256
-    )
+    # Idempotence : le serveur geopf ne renvoie pas de validateur HTTP fiable → on s'appuie
+    # sur le MD5 fourni par le flux. Skip si le .7z local correspond déjà.
+    if (
+        dest.exists()
+        and res.length is not None
+        and dest.stat().st_size == res.length
+        and (res.md5 is None or _md5_file(dest) == res.md5)
+    ):
+        status = "cached"
+        log.info("admin_express.cached", path=str(dest), edition=res.edition_date)
+    else:
+        result = http.download(res.download_url, dest)
+        status = result.status
+        if res.md5 and _md5_file(dest) != res.md5:  # contrôle d'intégrité
+            raise OSError(f"MD5 inattendu pour {dest} (attendu {res.md5})")
+        log.info(
+            "admin_express.download", status=status, bytes=result.n_bytes, sha256=result.sha256
+        )
     manifest = write_manifest(
         SOURCE,
         root,
@@ -135,7 +159,7 @@ def fetch() -> RawDataset:
             "zone": res.zone,
             "edition_date": res.edition_date,
             "md5_source": res.md5,
-            "download_status": result.status,
+            "download_status": status,
             "licence": "Licence Ouverte 2.0 (Etalab) — © IGN ADMIN EXPRESS COG CARTO",
         },
     )
