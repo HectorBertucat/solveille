@@ -27,6 +27,10 @@ log = get_logger("solveille.transform.commune_dvf")
 SOURCE_DVF = "dvf"
 #: Bornes plausibles du prix maison €/m² (écarte donations 1 €, aberrants).
 PRIX_MIN, PRIX_MAX = 200.0, 15000.0
+# Options read_csv DVF : quote='"' indispensable (virgules dans les adresses entre
+# guillemets, ex. "ALL ROSA BONHEUR ,ST GUILLAUME"). Défini avec \" pour éviter toute
+# ambiguïté de concaténation dans les f-strings.
+_READ_OPTS = "header = true, all_varchar = true, union_by_name = true, quote = '\"', escape = '\"'"
 
 _RESULT_DDL = """
 CREATE OR REPLACE TEMP TABLE _dvf_result (
@@ -50,7 +54,7 @@ WITH r AS (
          TRY_CAST(valeur_fonciere AS DOUBLE)    AS vf,
          type_local,
          TRY_CAST(surface_reelle_bati AS DOUBLE) AS surf
-  FROM read_csv('{dglob}', header = true, all_varchar = true, union_by_name = true)
+  FROM read_csv('{dglob}', {read_opts})
 ),
 mut AS (  -- 1 ligne par mutation : on ne somme jamais valeur_fonciere (répétée)
   SELECT id_mutation,
@@ -107,7 +111,7 @@ def build_commune_dvf(
         max_date = duckdb_io.scalar(
             con,
             "SELECT max(TRY_CAST(date_mutation AS DATE)) "
-            f"FROM read_csv('{glob_all}', header = true, all_varchar = true, union_by_name = true)",
+            f"FROM read_csv('{glob_all}', {_READ_OPTS})",
         )
         max_date = str(max_date) if max_date is not None else "1900-01-01"
         con.execute(_RESULT_DDL)
@@ -115,7 +119,11 @@ def build_commune_dvf(
             dglob = str(raw_dir / "*" / f"{dd}.csv.gz")
             con.execute(
                 _AGG_SQL.format(
-                    dglob=dglob, prix_min=prix_min, prix_max=prix_max, max_date=max_date
+                    dglob=dglob,
+                    read_opts=_READ_OPTS,
+                    prix_min=prix_min,
+                    prix_max=prix_max,
+                    max_date=max_date,
                 )
             )
         con.execute(f"COPY _dvf_result TO '{out}' (FORMAT PARQUET);")
