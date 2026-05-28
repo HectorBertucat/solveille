@@ -7,7 +7,7 @@ au fil de la roadmap (v0 : commune → commune_rga → … → commune_pression)
 from __future__ import annotations
 
 from solveille.common.logging import get_logger
-from solveille.transform import commune_rga, staging
+from solveille.transform import commune_rga, downscale_fideli, staging
 
 log = get_logger("solveille.transform.build")
 
@@ -21,7 +21,8 @@ def main() -> None:
     staging.build_commune_logement()
     staging.build_epci_stock()
     staging.build_epci_stock_periode()
-    # À venir (v0) : downscale_fideli, commune_dvf, mart commune_pression.
+    downscale_fideli.build_commune_stock()
+    # À venir (v0) : commune_dvf, mart commune_pression.
     log.info("build.done")
 
 
