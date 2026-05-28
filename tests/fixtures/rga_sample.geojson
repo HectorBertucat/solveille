@@ -1,0 +1,20 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {"DPT": "31", "NIVEAU": 1, "ALEA": "Faible"},
+      "geometry": {"type": "Polygon", "coordinates": [[[1.00, 43.00], [1.10, 43.00], [1.10, 43.10], [1.00, 43.10], [1.00, 43.00]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"DPT": "31", "NIVEAU": 2, "ALEA": "Moyen"},
+      "geometry": {"type": "Polygon", "coordinates": [[[1.20, 43.00], [1.30, 43.00], [1.30, 43.10], [1.20, 43.10], [1.20, 43.00]]]}
+    },
+    {
+      "type": "Feature",
+      "properties": {"DPT": "31", "NIVEAU": 3, "ALEA": "Fort"},
+      "geometry": {"type": "Polygon", "coordinates": [[[1.40, 43.50], [1.50, 43.50], [1.50, 43.60], [1.40, 43.60], [1.40, 43.50]]]}
+    }
+  ]
+}

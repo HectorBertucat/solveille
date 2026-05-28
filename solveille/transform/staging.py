@@ -20,6 +20,8 @@ log = get_logger("solveille.transform.staging")
 
 #: Nom de la couche communale dans le GeoPackage ADMIN EXPRESS COG CARTO v4.
 ADMIN_EXPRESS_LAYER = "commune"
+#: Répertoire brut de la source RGA 2026.
+SOURCE_RGA = "rga_2026"
 
 
 def _find_or_extract_admin_express_gpkg() -> Path:
@@ -91,4 +93,58 @@ def build_commune(
         if own:
             con.close()
     log.info("staging.commune", path=str(out), n_communes=n, bornage=deps or "national")
+    return out
+
+
+def build_rga(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    raw_dir: Path | None = None,
+    out: Path | None = None,
+    simplify_tolerance_m: float = 25.0,
+) -> Path:
+    """Construit `data/staging/rga.parquet` depuis les GeoJSON RGA 2026.
+
+    Reprojette 4326 → EPSG:2154 (**`always_xy:=true`** obligatoire : la sortie ArcGIS est
+    en lon/lat), simplifie en préservant la topologie (`simplify_tolerance_m`, défaut 25 m :
+    ~5× moins de sommets pour ~1 % d'écart d'aire — nécessaire pour tenir les intersections
+    dans 8 Go de RAM ; impact négligeable à l'échelle commune pour un indice indicatif),
+    valide la géométrie, conserve `code_dept`, `niveau` (1/2/3), `alea`.
+    """
+    s = get_settings()
+    raw_dir = raw_dir or s.source_raw_dir(SOURCE_RGA)
+    out = out or (s.staging_dir / "rga.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    files = sorted(p for p in raw_dir.glob("*.geojson") if not p.name.startswith("_"))
+    if not files:
+        raise FileNotFoundError("GeoJSON RGA absents — lance d'abord `make fetch-rga`.")
+
+    selects = [
+        f"""
+          SELECT DPT::VARCHAR AS code_dept,
+                 CAST(NIVEAU AS INTEGER) AS niveau,
+                 ALEA::VARCHAR AS alea,
+                 ST_AsWKB(
+                   ST_MakeValid(
+                     ST_SimplifyPreserveTopology(
+                       ST_Transform(geom, 'EPSG:4326', 'EPSG:2154', always_xy := true),
+                       {simplify_tolerance_m}
+                     )
+                   )
+                 ) AS geom_wkb
+          FROM ST_Read('{f}')
+        """
+        for f in files
+    ]
+    union = "\nUNION ALL\n".join(selects)
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(f"COPY ({union}) TO '{out}' (FORMAT PARQUET);")
+        n = duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{out}')")
+    finally:
+        if own:
+            con.close()
+    log.info("staging.rga", path=str(out), n_features=n, n_files=len(files))
     return out
