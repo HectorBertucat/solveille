@@ -19,7 +19,9 @@ def main() -> None:
     commune_rga.build_commune_rga()
     staging.build_commune_bascule()
     staging.build_commune_logement()
-    # À venir (v0) : epci_stock, downscale_fideli, commune_dvf, mart commune_pression.
+    staging.build_epci_stock()
+    staging.build_epci_stock_periode()
+    # À venir (v0) : downscale_fideli, commune_dvf, mart commune_pression.
     log.info("build.done")
 
 

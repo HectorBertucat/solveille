@@ -26,6 +26,8 @@ SOURCE_RGA = "rga_2026"
 SOURCE_BASCULE = "communes_bascule"
 #: Répertoire brut de la source INSEE logement.
 SOURCE_INSEE = "insee_logement"
+#: Répertoire brut de la source Fideli/SDES (exposition maisons par EPCI).
+SOURCE_FIDELI = "fideli_epci"
 
 # Codes d'arrondissements municipaux (Paris/Lyon/Marseille) à exclure pour éviter le
 # double comptage avec la commune entière (75056 / 69123 / 13055).
@@ -250,4 +252,104 @@ def build_commune_logement(
         if own:
             con.close()
     log.info("staging.commune_logement", path=str(out), n_communes=n)
+    return out
+
+
+def _fideli_csv(name: str, csv: Path | None) -> Path:
+    if csv is not None:
+        return csv
+    p = get_settings().source_raw_dir(SOURCE_FIDELI) / name
+    if not p.exists():
+        raise FileNotFoundError(f"{name} absent — lance d'abord `make fetch-fideli`.")
+    return p
+
+
+def build_epci_stock(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    csv: Path | None = None,
+    out: Path | None = None,
+) -> Path:
+    """Construit `data/staging/epci_stock.parquet` (maisons + surfaces exposées par EPCI).
+
+    Pivote le CSV long (`INDICATEUR_EXPOSITION`) ; `secret` (secret statistique) → NULL,
+    avec un flag `has_secret`. `siren_epci` = SIREN 9 chiffres (VARCHAR).
+    """
+    s = get_settings()
+    src = _fideli_csv("fideli_par_epci.csv", csv)
+    out = out or (s.staging_dir / "epci_stock.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    def _ind(label: str, typ: str) -> str:
+        return (
+            f"TRY_CAST(MAX(VALEUR_EXPOSITION) FILTER "
+            f"(WHERE INDICATEUR_EXPOSITION = '{label}') AS {typ})"
+        )
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT EPCI_CODE::VARCHAR AS siren_epci,
+                     any_value(EPCI_LIBELLE) AS nom_epci,
+                     {_ind("Maisons_indiv_exposees_RGA1", "BIGINT")} AS maisons_rga1,
+                     {_ind("Maisons_indiv_exposees_RGA2", "BIGINT")} AS maisons_rga2,
+                     {_ind("Maisons_indiv_exposees_RGA3", "BIGINT")} AS maisons_rga3,
+                     {_ind("Surface_exposee_RGA1_km2", "DOUBLE")} AS surface_rga1_km2,
+                     {_ind("Surface_exposee_RGA2_km2", "DOUBLE")} AS surface_rga2_km2,
+                     {_ind("Surface_exposee_RGA3_km2", "DOUBLE")} AS surface_rga3_km2,
+                     bool_or(VALEUR_EXPOSITION = 'secret') AS has_secret
+              FROM read_csv('{src}', delim = ';', header = true, all_varchar = true)
+              GROUP BY EPCI_CODE
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        n = duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{out}')")
+        nsecret = duckdb_io.scalar(
+            con, f"SELECT count(*) FILTER (WHERE has_secret) FROM read_parquet('{out}')"
+        )
+    finally:
+        if own:
+            con.close()
+    log.info("staging.epci_stock", path=str(out), n_epci=n, n_avec_secret=nsecret)
+    return out
+
+
+def build_epci_stock_periode(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    csv: Path | None = None,
+    out: Path | None = None,
+) -> Path:
+    """Construit `data/staging/epci_stock_periode.parquet` (maisons exposées par période).
+
+    Sert à pondérer la vulnérabilité du bâti (part construite avant ~1990). `secret` → NULL.
+    """
+    s = get_settings()
+    src = _fideli_csv("fideli_par_periode.csv", csv)
+    out = out or (s.staging_dir / "epci_stock_periode.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT EPCI_CODE::VARCHAR                            AS siren_epci,
+                     PERIODE_CONSTRUCTION::VARCHAR                 AS periode_construction,
+                     TRY_CAST(MAISONS_INDIV_EXPOSES_RGA1 AS BIGINT) AS maisons_rga1,
+                     TRY_CAST(MAISONS_INDIV_EXPOSES_RGA2 AS BIGINT) AS maisons_rga2,
+                     TRY_CAST(MAISONS_INDIV_EXPOSES_RGA3 AS BIGINT) AS maisons_rga3
+              FROM read_csv('{src}', delim = ';', header = true, all_varchar = true)
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        n = duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{out}')")
+    finally:
+        if own:
+            con.close()
+    log.info("staging.epci_stock_periode", path=str(out), n_lignes=n)
     return out

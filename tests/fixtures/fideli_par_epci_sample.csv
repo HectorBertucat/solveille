@@ -1,0 +1,13 @@
+"EPCI_CODE";"EPCI_LIBELLE";"INDICATEUR_EXPOSITION";"VALEUR_EXPOSITION"
+"200000172";"CC Test";"Maisons_indiv_exposees_RGA1";461
+"200000172";"CC Test";"Maisons_indiv_exposees_RGA2";59
+"200000172";"CC Test";"Maisons_indiv_exposees_RGA3";"secret"
+"200000172";"CC Test";"Surface_exposee_RGA1_km2";69.96
+"200000172";"CC Test";"Surface_exposee_RGA2_km2";6.9
+"200000172";"CC Test";"Surface_exposee_RGA3_km2";0
+"241300375";"CA Test2";"Maisons_indiv_exposees_RGA1";1000
+"241300375";"CA Test2";"Maisons_indiv_exposees_RGA2";2000
+"241300375";"CA Test2";"Maisons_indiv_exposees_RGA3";500
+"241300375";"CA Test2";"Surface_exposee_RGA1_km2";10
+"241300375";"CA Test2";"Surface_exposee_RGA2_km2";20
+"241300375";"CA Test2";"Surface_exposee_RGA3_km2";5
