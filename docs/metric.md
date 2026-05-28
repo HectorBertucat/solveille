@@ -12,7 +12,10 @@ E = clamp01( w_surface * part_alea_moyen_fort
 ```
 - `part_alea_moyen_fort` : aire(aléa≥moyen ∩ commune) / aire(commune) — via DuckDB spatial.
 - `part_maisons_vulnerables` : part des maisons exposées construites avant les règles limitant le risque (proxy période de construction Fideli ; les maisons anciennes sont plus sensibles).
-- Poids `w_*` documentés et ajustables (défaut suggéré : 0,6 / 0,4).
+- Poids `w_*` documentés et ajustables (défaut : 0,6 / 0,4).
+- **Gating (implémentation)** : si `part_alea_moyen_fort = 0`, alors **`E = 0`** quelle que soit la vulnérabilité. `part_maisons_vulnerables` est la part *des maisons exposées* : sans aléa moyen+fort, elle n'a pas de support (sinon la vulnérabilité EPCI fuirait sur une commune non argileuse, ex. Paris). Garantit `E=0 ⇒ score=0`.
+- **Vulnérabilité indisponible** (EPCI Fideli non apparié au COG commune) : `E = clamp01(part_alea_moyen_fort)` (exposition surfacique seule) plutôt que de sous-pondérer.
+- `E = 0` peut signifier « pas d'argile » **ou** « hors couverture RGA » (ex. Paris) : l'UI s'appuie sur `has_rga_coverage` pour ne pas afficher un faux « 0 mesuré ».
 
 ### T — Tension hydrique (dynamique, anomalie standardisée)
 Deux signaux **standardisés** (moyenne 0, écart-type 1 sur la climatologie locale), donc directement comparables et cohérents entre eux :
@@ -29,7 +32,7 @@ T = w_swi * dry_SWI + w_ips * dry_IPS      # si IPS indisponible : T = dry_SWI
 
 ### J — Enjeu (statique, € et stock)
 ```
-valeur_bati_exposee_eur ≈ n_maisons_exposees(commune) * surface_moyenne * prix_median_maison(commune, DVF)
+valeur_bati_exposee_eur ≈ n_maisons_exposees(commune) * surface_mediane * prix_median_maison(commune, DVF)
 ```
 + `n_tx_zone_exposee_12m` (transactions récentes de maisons en zone exposée → acheteurs potentiellement non avertis, d'autant que le zonage 2026 s'applique aux ventes depuis juillet 2026). `J` sert à **prioriser/illustrer**, pas à gonfler le score de pression.
 
