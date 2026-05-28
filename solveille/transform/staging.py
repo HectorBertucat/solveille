@@ -119,29 +119,26 @@ def build_rga(
     if not files:
         raise FileNotFoundError("GeoJSON RGA absents — lance d'abord `make fetch-rga`.")
 
-    selects = [
-        f"""
-          SELECT DPT::VARCHAR AS code_dept,
-                 CAST(NIVEAU AS INTEGER) AS niveau,
-                 ALEA::VARCHAR AS alea,
-                 ST_AsWKB(
-                   ST_MakeValid(
-                     ST_SimplifyPreserveTopology(
-                       ST_Transform(geom, 'EPSG:4326', 'EPSG:2154', always_xy := true),
-                       {simplify_tolerance_m}
-                     )
-                   )
-                 ) AS geom_wkb
-          FROM ST_Read('{f}')
-        """
-        for f in files
-    ]
-    union = "\nUNION ALL\n".join(selects)
-
     own = con is None
     con = con or duckdb_io.connect()
     try:
-        con.execute(f"COPY ({union}) TO '{out}' (FORMAT PARQUET);")
+        # Insertion fichier par fichier : borne le pic mémoire (un GeoJSON dept à la fois).
+        con.execute(
+            "CREATE OR REPLACE TEMP TABLE _rga_stg "
+            "(code_dept VARCHAR, niveau INTEGER, alea VARCHAR, geom_wkb BLOB)"
+        )
+        for f in files:
+            con.execute(
+                f"""
+                INSERT INTO _rga_stg
+                SELECT DPT::VARCHAR, CAST(NIVEAU AS INTEGER), ALEA::VARCHAR,
+                       ST_AsWKB(ST_MakeValid(ST_SimplifyPreserveTopology(
+                         ST_Transform(geom, 'EPSG:4326', 'EPSG:2154', always_xy := true),
+                         {simplify_tolerance_m})))
+                FROM ST_Read('{f}')
+                """
+            )
+        con.execute(f"COPY _rga_stg TO '{out}' (FORMAT PARQUET);")
         n = duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{out}')")
     finally:
         if own:

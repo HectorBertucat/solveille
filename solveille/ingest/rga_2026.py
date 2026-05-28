@@ -40,6 +40,24 @@ LICENCE = (
 )
 
 
+def _distinct_departements() -> list[str]:
+    """Liste les codes département présents dans le service (pour le run national)."""
+    params = {
+        "where": "1=1",
+        "outFields": "DPT",
+        "returnDistinctValues": "true",
+        "returnGeometry": "false",
+        "orderByFields": "DPT",
+        "f": "json",
+    }
+    data = http.get_json(QUERY_URL, params=params)
+    return [
+        a["DPT"]
+        for f in data.get("features", [])
+        if (a := f.get("attributes", {})) and a.get("DPT")
+    ]
+
+
 def _fetch_features(where: str) -> dict[str, Any]:
     """Récupère toutes les entités correspondant à `where` (pagination défensive)."""
     features: list[dict[str, Any]] = []
@@ -72,11 +90,8 @@ def fetch() -> RawDataset:
     s = get_settings()
     root = s.source_raw_dir(SOURCE)
     root.mkdir(parents=True, exist_ok=True)
-    deps = s.departements
-    if deps:
-        scopes = [(dd, f"DPT='{dd}'", f"{dd}.geojson") for dd in deps]
-    else:
-        scopes = [("FRA", "1=1", "FRA.geojson")]
+    deps = s.departements or _distinct_departements()  # national : dérive la liste des depts
+    scopes = [(dd, f"DPT='{dd}'", f"{dd}.geojson") for dd in deps]
 
     files = []
     total = 0
