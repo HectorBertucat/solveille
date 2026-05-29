@@ -44,6 +44,8 @@ _POIDS_SQL_DEPT = """
     SELECT num_maille,
            ST_MakeEnvelope(x93 - {h}, y93 - {h}, x93 + {h}, y93 + {h}) AS sq
     FROM read_parquet('{grille}'), bb
+    -- marge = demi-côté {h} : tout carré (centroïde ± {h}) intersectant une commune du dept a
+    -- son centroïde à <= {h} de la bbox communale → aucun candidat manqué (anti-cartésien exact).
     WHERE x93 BETWEEN bb.xmin - {h} AND bb.xmax + {h}
       AND y93 BETWEEN bb.ymin - {h} AND bb.ymax + {h}
   )
@@ -71,7 +73,8 @@ _POIDS_FALLBACK_SQL = """
     SELECT m.code_insee, gr.num_maille, ST_Area(m.g) AS poids_aire,
            row_number() OVER (
              PARTITION BY m.code_insee
-             ORDER BY ST_Distance(ST_Centroid(m.g), ST_Point(gr.x93, gr.y93))
+             -- tie-breaker num_maille : sortie déterministe si mailles équidistantes (idempotence).
+             ORDER BY ST_Distance(ST_Centroid(m.g), ST_Point(gr.x93, gr.y93)), gr.num_maille
            ) AS rn
     FROM miss m, read_parquet('{grille}') gr
   )
