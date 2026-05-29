@@ -176,6 +176,32 @@ JOIN (
 WHERE p.code_departement = '{dep}'
 """
 
+#: Rayon de représentativité (m) : une commune SANS station hôte hérite de la station la plus
+#: proche < R, avec une confiance décroissant linéairement (`f_repr = 1 − d/R`). Conservateur
+#: (l'effet se concentre près des stations) ; tunable. BDLISA libre/captive = raffinement futur.
+REPR_RADIUS_M = 10000.0
+
+# Représentativité : communes du dept SANS station hôte ← station la plus proche < REPR_RADIUS_M
+# du centroïde, confiance = f_hist · f_repr (`f_repr = 1 − d/R`). Anti-OOM par dept (approx :
+# stations du même dept ; une station inter-dept plus proche en bordure est ignorée).
+_REPR_DEPT_SQL = """
+INSERT INTO _station_commune
+WITH miss AS (
+  SELECT code_insee, ST_Centroid(ST_MakeValid(ST_GeomFromWKB(geom_wkb))) AS ctr
+  FROM read_parquet('{commune}') WHERE code_dept = '{dep}'
+    AND code_insee NOT IN (SELECT code_insee FROM _station_commune)
+),
+cand AS (
+  SELECT m.code_insee, p.code_bss, p.confiance, ST_Distance(m.ctr, p.pt) AS d,
+         row_number() OVER (PARTITION BY m.code_insee
+                            ORDER BY ST_Distance(m.ctr, p.pt), p.code_bss) AS rn
+  FROM miss m JOIN _pz p ON p.code_departement = '{dep}'
+  WHERE ST_Distance(m.ctr, p.pt) <= {r}
+)
+SELECT code_bss, code_insee, confiance * (1.0 - d / {r}), 'repr'
+FROM cand WHERE rn = 1
+"""
+
 # Repli : stations non contenues spatialement → rattachées via leur code_commune_insee (ADES).
 _FALLBACK_SQL = """
 INSERT INTO _station_commune
@@ -224,11 +250,13 @@ def build_commune_ips(
     piezo_ips_parquet: Path | None = None,
     commune_parquet: Path | None = None,
     out: Path | None = None,
+    radius_m: float = REPR_RADIUS_M,
 ) -> Path:
     """Construit `data/staging/commune_ips.parquet` (z_ips/ips_nqt/confiance communaux mensuels).
 
-    Rattachement spatial point-dans-commune (par dept), repli `code_commune_insee`, anti-jointure
-    loggée (stations rattachées à aucune commune du périmètre).
+    Rattachement **hôte** (point-dans-commune par dept, repli `code_commune_insee`) puis
+    **représentativité** (communes sans hôte ← station la plus proche < `radius_m`, confiance
+    décroissante). Anti-jointure loggée (stations rattachées à aucune commune du périmètre).
     """
     s = get_settings()
     stations_parquet = stations_parquet or (s.staging_dir / "piezo_stations.parquet")
@@ -256,7 +284,11 @@ def build_commune_ips(
         n_spatial = duckdb_io.scalar(con, "SELECT count(*) FROM _station_commune") or 0
         n_dup_spatial = n_spatial_raw - n_spatial
         con.execute(_FALLBACK_SQL.format(commune=commune_parquet))
-        n_total_match = duckdb_io.scalar(con, "SELECT count(*) FROM _station_commune") or 0
+        n_host = duckdb_io.scalar(con, "SELECT count(*) FROM _station_commune") or 0
+        # Représentativité : communes sans station hôte ← station la plus proche < R km.
+        for dep in depts:
+            con.execute(_REPR_DEPT_SQL.format(commune=commune_parquet, dep=dep, r=radius_m))
+        n_repr = (duckdb_io.scalar(con, "SELECT count(*) FROM _station_commune") or 0) - n_host
         n_stations = (
             duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{stations_parquet}')") or 0
         )
@@ -284,7 +316,8 @@ def build_commune_ips(
         n_mois=n_mois,
         confiance_moyenne=conf_moy,
         n_rattach_spatial=n_spatial,
-        n_rattach_insee=n_total_match - n_spatial,
+        n_rattach_insee=n_host - n_spatial,
+        n_rattach_repr=n_repr,
         n_dup_spatial=n_dup_spatial,
         stations_orphelines=n_orphan,
     )
