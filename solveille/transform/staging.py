@@ -13,7 +13,8 @@ import duckdb
 
 from solveille.common import duckdb_io
 from solveille.common.archive import extract_7z, extract_zip
-from solveille.common.config import get_settings
+from solveille.common.config import SWI_SERVED_FROM, get_settings
+from solveille.common.geo import METROPOLE_L93_BBOX
 from solveille.common.logging import get_logger
 
 log = get_logger("solveille.transform.staging")
@@ -28,6 +29,8 @@ SOURCE_BASCULE = "communes_bascule"
 SOURCE_INSEE = "insee_logement"
 #: Répertoire brut de la source Fideli/SDES (exposition maisons par EPCI).
 SOURCE_FIDELI = "fideli_epci"
+#: Répertoire brut de la source SWI CatNat (humidité des sols mensuelle).
+SOURCE_SWI = "swi_catnat"
 
 # Codes d'arrondissements municipaux (Paris/Lyon/Marseille) à exclure pour éviter le
 # double comptage avec la commune entière (75056 / 69123 / 13055).
@@ -352,4 +355,232 @@ def build_epci_stock_periode(
         if own:
             con.close()
     log.info("staging.epci_stock_periode", path=str(out), n_lignes=n)
+    return out
+
+
+def build_swi_grille(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    grille_csv: Path | None = None,
+    out: Path | None = None,
+) -> Path:
+    """Construit `data/staging/swi_grille.parquet` (centroïde L93 de chaque maille 8 km).
+
+    Le fichier grille a 5 lignes de commentaire `#` (dont l'en-tête) → `comment='#'`,
+    `header=false`, colonnes positionnelles : `column0`=num_maille, `column3`=lambx93,
+    `column4`=lamby93 (en **mètres** L93 — l'en-tête dit « hectomètres » mais c'est faux pour
+    les colonnes lamb*93*). Garde-fou SRS : alerte si un centroïde sort de l'emprise métropole.
+    """
+    s = get_settings()
+    grille_csv = grille_csv or (s.source_raw_dir(SOURCE_SWI) / "grille_mailles.csv")
+    if not grille_csv.exists():
+        raise FileNotFoundError("Grille SWI absente — lance d'abord `make fetch-swi`.")
+    out = out or (s.staging_dir / "swi_grille.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    xmin, ymin, xmax, ymax = METROPOLE_L93_BBOX
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT CAST(column0 AS INTEGER) AS num_maille,
+                     CAST(column3 AS DOUBLE)  AS x93,
+                     CAST(column4 AS DOUBLE)  AS y93
+              FROM read_csv('{grille_csv}', delim = ';', header = false, comment = '#')
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        n = duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{out}')")
+        out_of_box = duckdb_io.scalar(
+            con,
+            f"""SELECT count(*) FROM read_parquet('{out}')
+                WHERE x93 NOT BETWEEN {xmin} AND {xmax}
+                   OR y93 NOT BETWEEN {ymin} AND {ymax}""",
+        )
+    finally:
+        if own:
+            con.close()
+    if out_of_box:
+        log.warning("staging.swi_grille.out_of_metropole_bbox", n=out_of_box)  # SRS suspect ?
+    log.info("staging.swi_grille", path=str(out), n_mailles=n, hors_bbox=out_of_box)
+    return out
+
+
+def build_swi_maille(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    raw_dir: Path | None = None,
+    out: Path | None = None,
+) -> Path:
+    """Construit `data/staging/swi_maille.parquet` (série mensuelle SWI par maille, **tout
+    l'historique** — base de la climatologie).
+
+    Lit les `swi.*.csv.gz` (en-tête `"NUMERO";"LAMBX";"LAMBY";"DATE";"SWI_UNIF_MENS"`,
+    `delim=';'`). `DATE` = `AAAAMM` → 1er du mois. `SWI` brut (non clampé, peut déborder de
+    `[0,1]`). La géométrie vient de la grille (`build_swi_grille`), pas d'ici.
+    """
+    s = get_settings()
+    raw_dir = raw_dir or s.source_raw_dir(SOURCE_SWI)
+    files = sorted(raw_dir.glob("swi.*.csv.gz"))
+    if not files:
+        raise FileNotFoundError("CSV.gz SWI absents — lance d'abord `make fetch-swi`.")
+    out = out or (s.staging_dir / "swi_maille.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    glob = f"{raw_dir}/swi.*.csv.gz"
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT CAST(NUMERO AS INTEGER)                         AS num_maille,
+                     CAST(strptime(CAST(DATE AS VARCHAR), '%Y%m') AS DATE) AS date_mois,
+                     CAST(SWI_UNIF_MENS AS DOUBLE)                   AS swi
+              FROM read_csv('{glob}', delim = ';', header = true)
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        stats = con.execute(
+            f"""SELECT count(*), count(DISTINCT num_maille),
+                       min(date_mois), max(date_mois)
+                FROM read_parquet('{out}')"""
+        ).fetchone()
+        n, n_mailles, dmin, dmax = stats if stats else (0, 0, None, None)
+    finally:
+        if own:
+            con.close()
+    log.info(
+        "staging.swi_maille",
+        path=str(out),
+        n_lignes=n,
+        n_mailles=n_mailles,
+        date_min=str(dmin),
+        date_max=str(dmax),
+        n_fichiers=len(files),
+    )
+    return out
+
+
+def build_swi_clim(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    maille_parquet: Path | None = None,
+    out: Path | None = None,
+    ref_from: str | None = None,
+    ref_to: str | None = None,
+) -> Path:
+    """Construit `data/staging/swi_clim.parquet` : climatologie **par maille et par mois
+    calendaire** (moyenne, écart-type, n) sur l'historique.
+
+    Par défaut tout l'historique (`ref_from`/`ref_to` None) ; passer une fenêtre (ex.
+    `'1991-01-01'`/`'2020-12-01'`) pour une normale glissante. L'anomalie standardisée
+    `z_SWI` est ensuite `(swi − swi_mean)/swi_std` pour le **même mois** (cf. `build_swi_anomalie`).
+    """
+    s = get_settings()
+    maille_parquet = maille_parquet or (s.staging_dir / "swi_maille.parquet")
+    out = out or (s.staging_dir / "swi_clim.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    bounds = []
+    if ref_from:
+        bounds.append(f"date_mois >= DATE '{ref_from}'")
+    if ref_to:
+        bounds.append(f"date_mois <= DATE '{ref_to}'")
+    where = ("WHERE " + " AND ".join(bounds)) if bounds else ""
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT num_maille,
+                     month(date_mois)::INTEGER AS mois_cal,
+                     avg(swi)                   AS swi_mean,
+                     stddev_samp(swi)           AS swi_std,
+                     count(*)                   AS n
+              FROM read_parquet('{maille_parquet}')
+              {where}
+              GROUP BY num_maille, month(date_mois)
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        stats = con.execute(
+            f"""SELECT count(*), min(n), max(n),
+                       count(*) FILTER (WHERE swi_std IS NULL OR swi_std < 1e-9)
+                FROM read_parquet('{out}')"""
+        ).fetchone()
+        n, nmin, nmax, n_degenere = stats if stats else (0, 0, 0, 0)
+    finally:
+        if own:
+            con.close()
+    log.info(
+        "staging.swi_clim",
+        path=str(out),
+        n_lignes=n,
+        n_par_mois_min=nmin,
+        n_par_mois_max=nmax,
+        n_std_degenere=n_degenere,
+    )
+    return out
+
+
+def build_swi_anomalie(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    maille_parquet: Path | None = None,
+    clim_parquet: Path | None = None,
+    out: Path | None = None,
+    served_from: str = SWI_SERVED_FROM,
+) -> Path:
+    """Construit `data/staging/swi_anomalie.parquet` : anomalie standardisée `z_SWI` par
+    maille et par mois, sur la **fenêtre servie** (`served_from` →, défaut 2017-01).
+
+    `z_SWI = (swi − swi_mean)/swi_std` vs la climatologie du **même mois calendaire**.
+    Sécheresse ⇒ `z_SWI` négatif. `swi_std` nul/dégénéré ⇒ `z_SWI` NULL (flag implicite :
+    la commune retombera sur ses autres mailles / signalé en aval).
+    """
+    s = get_settings()
+    maille_parquet = maille_parquet or (s.staging_dir / "swi_maille.parquet")
+    clim_parquet = clim_parquet or (s.staging_dir / "swi_clim.parquet")
+    out = out or (s.staging_dir / "swi_anomalie.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        con.execute(
+            f"""
+            COPY (
+              SELECT m.num_maille,
+                     m.date_mois,
+                     m.swi,
+                     CASE WHEN c.swi_std IS NULL OR c.swi_std < 1e-9 THEN NULL
+                          ELSE (m.swi - c.swi_mean) / c.swi_std END AS z_swi
+              FROM read_parquet('{maille_parquet}') m
+              JOIN read_parquet('{clim_parquet}') c
+                ON c.num_maille = m.num_maille AND c.mois_cal = month(m.date_mois)
+              WHERE m.date_mois >= DATE '{served_from}'
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        stats = con.execute(
+            f"""SELECT count(*), count(*) FILTER (WHERE z_swi IS NULL),
+                       round(avg(z_swi), 4), round(stddev_samp(z_swi), 4)
+                FROM read_parquet('{out}')"""
+        ).fetchone()
+        n, n_null, zmean, zstd = stats if stats else (0, 0, None, None)
+    finally:
+        if own:
+            con.close()
+    log.info(
+        "staging.swi_anomalie",
+        path=str(out),
+        n_lignes=n,
+        n_z_null=n_null,
+        z_moyen=zmean,
+        z_ecart_type=zstd,
+    )
     return out

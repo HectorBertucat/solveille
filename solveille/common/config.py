@@ -17,6 +17,11 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 #: User-Agent explicite et identifiable pour toutes les requêtes sortantes.
 USER_AGENT = "solveille/0.1 (+https://github.com/hectorbertucat/solveille)"
 
+#: Début de la fenêtre temporelle SERVIE (curseur de carte, mart mensuel, tuiles). La
+#: **climatologie** SWI utilise tout l'historique disponible — c'est seulement la plage
+#: navigée/affichée. Voir ADR-016. Le dernier mois est dynamique (max des données).
+SWI_SERVED_FROM = "2017-01-01"
+
 
 class Settings(BaseSettings):
     """Réglages d'ingestion et de calcul (immuables après chargement)."""
