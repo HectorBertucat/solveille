@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Garde-fou DVF : pas d'indexation par les moteurs -->
   <meta name="robots" content="noindex, nofollow" />
-  <title>Solveille — la carte de l'enjeu RGA</title>
+  <title>Solveille — la boussole RGA</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
@@ -28,6 +28,18 @@
     .legend .row { display:flex; align-items:center; gap:8px; margin:3px 0; }
     .legend .sw { width:16px; height:16px; border-radius:3px; border:1px solid rgba(0,0,0,.15); }
     .legend .bascule-sw { width:16px; height:0; border-top:3px solid #6d28d9; }
+    .legend .caveat { margin-top:8px; padding-top:8px; border-top:1px solid #eee; color:var(--muted); font-size:10.5px; line-height:1.35; }
+    /* Curseur de date (bas-centre) */
+    .timebar { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:3;
+               background:#fff; border-radius:10px; box-shadow:0 2px 12px rgba(0,0,0,.18);
+               padding:10px 16px; display:flex; align-items:center; gap:12px; width:min(560px,86vw); }
+    .timebar input[type=range] { flex:1; accent-color:#bd0026; }
+    .timebar .month { font-weight:700; font-size:14px; min-width:96px; text-align:right; font-variant-numeric:tabular-nums; }
+    .timebar button { border:none; background:#1a1a2e; color:#fff; width:30px; height:30px; border-radius:6px; cursor:pointer; font-size:13px; }
+    /* Sparkline de pression dans la fiche */
+    .spark { margin:10px 0 2px; }
+    .spark svg { display:block; width:100%; height:46px; }
+    .spark .axis { font-size:10px; color:var(--muted); display:flex; justify-content:space-between; }
     .panel { position:absolute; right:0; top:64px; bottom:0; width:340px; z-index:3; background:#fff;
              box-shadow:-2px 0 16px rgba(0,0,0,.12); padding:18px 20px; overflow:auto; transform:translateX(100%);
              transition:transform .2s ease; }
@@ -46,7 +58,7 @@
 </head>
 <body>
   <header>
-    <h1>Solveille <small>· la carte de l'enjeu RGA</small></h1>
+    <h1>Solveille <small>· la boussole RGA</small></h1>
     <div class="disclaimer">Indice territorial <b>indicatif</b> — ne prédit pas de fissures par bâtiment, n'est ni un diagnostic ni un conseil d'achat/assurance.</div>
     <form class="search" id="search">
       <input id="q" placeholder="Code INSEE ou commune…" autocomplete="off" />
@@ -55,14 +67,21 @@
   </header>
   <div id="map"></div>
   <div class="legend">
-    <h3>Exposition argile (E)</h3>
-    <div class="row"><span class="sw" style="background:#bd0026"></span> Très élevée (≥ 0,8)</div>
-    <div class="row"><span class="sw" style="background:#f03b20"></span> Élevée (0,6–0,8)</div>
-    <div class="row"><span class="sw" style="background:#fd8d3c"></span> Modérée (0,4–0,6)</div>
-    <div class="row"><span class="sw" style="background:#fecc5c"></span> Faible (0,2–0,4)</div>
-    <div class="row"><span class="sw" style="background:#ffffb2"></span> Très faible (&lt; 0,2)</div>
+    <h3>Pression RGA — <span id="legendMonth">…</span></h3>
+    <div class="row"><span class="sw" style="background:#bd0026"></span> Très élevée</div>
+    <div class="row"><span class="sw" style="background:#f03b20"></span> Élevée</div>
+    <div class="row"><span class="sw" style="background:#fd8d3c"></span> Modérée</div>
+    <div class="row"><span class="sw" style="background:#fecc5c"></span> Faible</div>
+    <div class="row"><span class="sw" style="background:#ffffb2"></span> Très faible</div>
     <div class="row"><span class="sw" style="background:#e8e8e8"></span> Pas d'argile / hors couverture</div>
     <div class="row" style="margin-top:6px"><span class="bascule-sw"></span> Reclassée au 1ᵉʳ juil. 2026</div>
+    <div class="caveat">Pression = exposition argile × sécheresse du moment (SWI). Nowcast <b>lissé sur 3 mois</b>, anomalie d'humidité des sols vs normale 1960→.</div>
+  </div>
+  <div class="timebar">
+    <button id="prevM" aria-label="Mois précédent">‹</button>
+    <input type="range" id="month" min="0" max="0" value="0" step="1" aria-label="Mois" />
+    <button id="nextM" aria-label="Mois suivant">›</button>
+    <span class="month" id="monthLabel">—</span>
   </div>
   <aside class="panel" id="panel"></aside>
   <script src="app.js"></script>
