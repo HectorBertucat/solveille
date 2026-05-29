@@ -3,15 +3,21 @@
 from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 from starlette.requests import Request
 from starlette.responses import Response
 
 from solveille.api.deps import MartUnavailableError
 from solveille.api.routes import DISCLAIMER, router
+
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+_FRONT_DIR = _REPO_ROOT / "front"
+_TILES_DIR = _REPO_ROOT / "tiles" / "out"
 
 app = FastAPI(
     title="Solveille API",
@@ -54,3 +60,10 @@ def healthz() -> dict[str, str]:
 
 
 app.include_router(router)
+
+# Service statique : PMTiles (range requests) + front MapLibre. Montés APRÈS les routes API
+# (le mount "/" est le moins prioritaire) → `make api` sert tout sur le même origin.
+if _TILES_DIR.is_dir():
+    app.mount("/tiles", StaticFiles(directory=_TILES_DIR), name="tiles")
+if _FRONT_DIR.is_dir():
+    app.mount("/", StaticFiles(directory=_FRONT_DIR, html=True), name="front")
