@@ -20,6 +20,8 @@ from solveille.transform import (
     commune_swi,
     downscale_fideli,
     mart,
+    piezo,
+    piezo_ips,
     staging,
 )
 
@@ -46,10 +48,27 @@ def build_all() -> None:
     staging.build_swi_anomalie()
     commune_swi.build_commune_maille_poids()
     commune_swi.build_commune_swi()
+    # v1.1 — IPS piézométrique (raffinement local de T) : optionnel (skip si pas de fetch-piezo)
+    build_piezo_chain()
     # marts : mensuel d'abord (fournit le dernier mois au statique)
     mart.build_commune_pression_mensuel()
     mart.build_commune_pression()
     log.info("build.done")
+
+
+def build_piezo_chain() -> bool:
+    """Chaîne IPS piézométrique (staging → IPS → `commune_ips`). **Optionnelle** : si le brut
+    Hub'eau est absent (`make fetch-piezo` non lancé), on **skip** avec un avertissement — le
+    SWI porte seul la boussole (couverture 100 %). Renvoie True si l'IPS a été construit."""
+    try:
+        piezo.build_piezo_stations()
+        piezo.build_piezo_mensuel()
+        piezo_ips.build_piezo_ips()
+        piezo_ips.build_commune_ips()
+    except FileNotFoundError as exc:
+        log.warning("build.piezo_skip", reason=str(exc))  # IPS optionnel (raffinement local)
+        return False
+    return True
 
 
 def refresh_swi() -> None:
