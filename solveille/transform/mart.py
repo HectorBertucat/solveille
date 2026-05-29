@@ -24,7 +24,7 @@ from solveille.common import duckdb_io
 from solveille.common.config import get_settings
 from solveille.common.logging import get_logger
 from solveille.common.raw import read_manifest
-from solveille.metric.ip_rga import GAIN, GAMMA, NIVEAU_LABELS, W_BATI, W_SURFACE
+from solveille.metric.ip_rga import GAIN, GAMMA, NIVEAU_LABELS, W_BATI, W_IPS_MAX, W_SURFACE
 
 log = get_logger("solveille.transform.mart")
 
@@ -93,32 +93,43 @@ COPY (
 """
 
 
-# Base mensuelle : E (réplique metric.exposition_e) × dry_SWI → T → score. dry_SWI =
-# sigma(-GAIN·z) = 1/(1+exp(GAIN·z)). T = dry_SWI en v1.0 (IPS reporté). score borné [0,100].
+# Base mensuelle : E (réplique metric.exposition_e) × T → score. dry = sigma(-GAIN·z) =
+# 1/(1+exp(GAIN·z)). v1.1 : T = (w_swi·dry_SWI + w_ips·dry_IPS)/(w_swi+w_ips), w_swi=1,
+# w_ips = confiance·W_IPS_MAX (réplique metric.tension_t). dry_IPS/z_ips NULL ou w_ips≤0
+# (pas de station) ⇒ T = dry_SWI (repli SWI universel). score borné [0,100].
 _MENSUEL_BASE_SQL = """
 CREATE OR REPLACE TEMP TABLE _mensuel AS
-SELECT insee, date_mois, E, z_swi, dry_swi, dry_swi AS T,
-       CAST(LEAST(GREATEST(round(100.0 * E * pow(dry_swi, {gamma})), 0), 100) AS INTEGER)
-         AS ip_rga_score
+SELECT insee, date_mois, E, z_swi, dry_swi, z_ips, dry_ips, w_ips,
+       CASE WHEN dry_ips IS NULL OR w_ips <= 0.0 THEN dry_swi
+            ELSE (dry_swi + w_ips * dry_ips) / (1.0 + w_ips) END AS T,
+       CAST(LEAST(GREATEST(round(100.0 * E * pow(
+         CASE WHEN dry_ips IS NULL OR w_ips <= 0.0 THEN dry_swi
+              ELSE (dry_swi + w_ips * dry_ips) / (1.0 + w_ips) END, {gamma})), 0), 100)
+         AS INTEGER) AS ip_rga_score
 FROM (
   SELECT sw.code_insee AS insee, sw.date_mois, sw.z_swi,
          {e_expr}::DOUBLE                                AS E,
-         (1.0 / (1.0 + exp({gain} * sw.z_swi)))::DOUBLE  AS dry_swi
+         (1.0 / (1.0 + exp({gain} * sw.z_swi)))::DOUBLE  AS dry_swi,
+         {ips_z}   AS z_ips,
+         {ips_dry} AS dry_ips,
+         {ips_w}   AS w_ips
   FROM read_parquet('{commune_swi}') sw
   LEFT JOIN read_parquet('{commune_rga}')   cr ON cr.code_insee = sw.code_insee
   LEFT JOIN read_parquet('{commune_stock}') cs ON cs.code_insee = sw.code_insee
+  {ips_join}
 )
 """
 
 # Niveaux par quantiles : E<=0 (pas d'argile / hors couverture) ⇒ NULL ; sinon bin du score.
+# confiance_t = part de l'IPS dans T = w_ips/(w_swi+w_ips) ∈ [0, W_IPS_MAX/(1+W_IPS_MAX)] ;
+# 0 = SWI seul (signal universel, pas de corroboration piézo locale).
 _MENSUEL_COPY_SQL = """
 COPY (
-  SELECT insee, date_mois, z_swi, dry_swi,
-         CAST(NULL AS DOUBLE) AS z_ips, CAST(NULL AS DOUBLE) AS dry_ips,
+  SELECT insee, date_mois, z_swi, dry_swi, z_ips, dry_ips,
          T, ip_rga_score,
          CASE WHEN E <= 0 THEN NULL {code_when} END AS ip_rga_niveau_code,
          CASE WHEN E <= 0 THEN NULL {label_when} END AS ip_rga_niveau,
-         1.0 AS confiance_t
+         CASE WHEN w_ips <= 0.0 THEN 0.0 ELSE w_ips / (1.0 + w_ips) END AS confiance_t
   FROM _mensuel
 ) TO '{out}' (FORMAT PARQUET);
 """
@@ -143,6 +154,28 @@ def build_commune_pression_mensuel(
     seuils_out = seuils_out or (s.marts_dir / "seuils_niveaux.json")
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    # IPS optionnel : si `commune_ips.parquet` est présent (fetch-piezo lancé), on branche
+    # dry_IPS/w_ips dans T ; sinon repli SWI seul (comportement v1.0, T = dry_SWI).
+    commune_ips = stg / "commune_ips.parquet"
+    if commune_ips.exists():
+        ips_frag = {
+            "ips_join": (
+                f"LEFT JOIN read_parquet('{commune_ips}') ci "
+                "ON ci.insee = sw.code_insee AND ci.date_mois = sw.date_mois"
+            ),
+            "ips_z": "ci.z_ips",
+            "ips_dry": f"(1.0 / (1.0 + exp({GAIN} * ci.z_ips)))::DOUBLE",
+            "ips_w": f"CASE WHEN ci.z_ips IS NULL THEN 0.0 "
+            f"ELSE COALESCE(ci.confiance, 0.0) * {W_IPS_MAX} END",
+        }
+    else:
+        ips_frag = {
+            "ips_join": "",
+            "ips_z": "CAST(NULL AS DOUBLE)",
+            "ips_dry": "CAST(NULL AS DOUBLE)",
+            "ips_w": "0.0",
+        }
+
     own = con is None
     con = con or duckdb_io.connect()
     try:
@@ -154,6 +187,7 @@ def build_commune_pression_mensuel(
                 commune_swi=stg / "commune_swi.parquet",
                 commune_rga=stg / "commune_rga.parquet",
                 commune_stock=stg / "commune_stock.parquet",
+                **ips_frag,
             )
         )
         raw = duckdb_io.scalar(

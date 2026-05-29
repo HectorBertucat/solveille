@@ -25,13 +25,16 @@ _MART = """SELECT * FROM (VALUES
       last_updated_admin_express, last_updated_rga, last_updated_bascule,
       last_updated_insee, last_updated_fideli, last_updated_dvf, last_updated_swi)"""
 
-# Mensuel : Toulouse sur 2 mois (sec en déc, plus humide en nov) ; Paris gaté (E=0).
+# Mensuel : Toulouse sur 2 mois (sec en déc, plus humide en nov ; IPS local présent) ;
+# Paris gaté (E=0, pas d'IPS). Colonnes z_ips/dry_ips/confiance_t (v1.1).
 _MENSUEL = """SELECT * FROM (VALUES
-    ('31555', DATE '2025-11-01', -0.5, 0.62, 0.62, 1.0, 30, 'Modérée', 3),
-    ('31555', DATE '2025-12-01', -1.2, 0.77, 0.77, 1.0, 45, 'Élevée', 4),
-    ('75056', DATE '2025-11-01', -0.5, 0.62, 0.62, 1.0, 0, NULL::VARCHAR, NULL::INTEGER),
-    ('75056', DATE '2025-12-01', -1.2, 0.77, 0.77, 1.0, 0, NULL::VARCHAR, NULL::INTEGER)
-  ) t(insee, date_mois, z_swi, dry_swi, T, confiance_t, ip_rga_score,
+    ('31555', DATE '2025-11-01', -0.5, 0.62, -0.4, 0.60, 0.62, 0.13, 30, 'Modérée', 3),
+    ('31555', DATE '2025-12-01', -1.2, 0.77, -0.9, 0.71, 0.77, 0.13, 45, 'Élevée', 4),
+    ('75056', DATE '2025-11-01', -0.5, 0.62, NULL::DOUBLE, NULL::DOUBLE, 0.62, 0.0, 0,
+     NULL::VARCHAR, NULL::INTEGER),
+    ('75056', DATE '2025-12-01', -1.2, 0.77, NULL::DOUBLE, NULL::DOUBLE, 0.77, 0.0, 0,
+     NULL::VARCHAR, NULL::INTEGER)
+  ) t(insee, date_mois, z_swi, dry_swi, z_ips, dry_ips, T, confiance_t, ip_rga_score,
       ip_rga_niveau, ip_rga_niveau_code)"""
 
 

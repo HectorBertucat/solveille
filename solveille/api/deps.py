@@ -20,6 +20,8 @@ from solveille.common.config import get_settings
 _MENSUEL_COLS = (
     "z_swi",
     "dry_swi",
+    "z_ips",
+    "dry_ips",
     "T",
     "confiance_t",
     "ip_rga_score",
