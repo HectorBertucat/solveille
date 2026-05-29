@@ -20,14 +20,15 @@ Construire dans l'ordre. Chaque incrément doit être démontrable et utile en s
 ## v1 — « La boussole » (nowcast dynamique)
 **But** : ajouter la tension hydrique du moment. Phasé : **v1.0 = SWI** (signal universel, 100 % des communes) → **v1.1 = IPS Hub'eau** (raffinement local). Voir ADR-015/016/017.
 
-### v1.0 — SWI (la dynamique nationale)
-- [ ] Ingestion **SWI CatNat** (CDN data.gouv `…-catnat`) → `swi_maille`, `swi_grille`.
-- [ ] Climatologie mensuelle/maille (tout l'historique) → anomalie standardisée `z_SWI` (`swi_anomalie`).
-- [ ] Rattachement maille SWI ↔ commune (carré 8 km ∩ commune, pondéré par aire) → `commune_swi`.
-- [ ] Calcul `T = dry_SWI` puis `IP-RGA = round(100·E·T^0.8)` (5 niveaux, quantiles nationaux) → `commune_pression_mensuel` + statique `*_latest`.
-- [ ] **Curseur de date** dans l'UI (niveau IP-RGA par mois en attribut de tuile `n_AAAAMM`) + sparkline de pression dans la fiche.
-- [ ] **systemd timer** mensuel SWI ; `last_updated_swi` exposé.
-- [ ] Tests métier : monotonie (plus sec ⇒ score ≥), `E=0 ⇒ 0`, **couverture nationale 100 % via SWI**, cohérence temporelle (mois sec connu > mois humide).
+### v1.0 — SWI (la dynamique nationale) ✅ **Livré**
+- [x] Ingestion **SWI CatNat** (CDN data.gouv `…-catnat`) → `swi_maille`, `swi_grille`.
+- [x] Climatologie mensuelle/maille (tout l'historique 1960→) → anomalie standardisée `z_SWI` (`swi_anomalie`).
+- [x] Rattachement maille SWI ↔ commune (carré 8 km ∩ commune, pondéré par aire) → `commune_swi` (couverture 100 %).
+- [x] Calcul `T = dry_SWI` puis `IP-RGA = round(100·E·T^0.8)` (5 niveaux, quantiles nationaux) → `commune_pression_mensuel` + statique `*_latest`.
+- [x] **Curseur de date** dans l'UI (niveau IP-RGA par mois en attribut de tuile `n_AAAAMM`) + sparkline de pression dans la fiche.
+- [x] **systemd timer** mensuel SWI (`deploy/`) ; `last_updated_swi` exposé.
+- [x] Tests métier : monotonie, `E=0 ⇒ 0`, **couverture nationale 100 % via SWI**, cohérence temporelle (mois sec > mois humide). **71 tests.**
+**Chiffres v1.0** : 34 746 communes × 108 mois (2017-01→2025-12) ; seuils niveaux [24,35,47,61] ; août 2022 (sécheresse) ressort en pression nationale max (z̄ −1.44).
 
 ### v1.1 — IPS Hub'eau (raffinement local)
 - [ ] Ingestion **Hub'eau** (`stations` par dept → `code_bss` ; `chroniques` pour la climatologie ; `chroniques_tr` quotidien) → `piezo_ips` (recalcul IPS, classes BRGM).
