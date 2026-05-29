@@ -33,13 +33,15 @@ Règles communes : reprojeter en **EPSG:2154** dès l'ingestion ; écrire le **b
 - **⚠️ Important** : configuration SIM **« uniforme » spécifique au dispositif CatNat** → à n'utiliser **que** pour cet usage (c'est exactement le nôtre). Ne pas l'employer pour de l'humidité de surface générique.
 
 ## 5. Hub'eau Piézométrie (BRGM/ADES) — IPS nappes `T`
-- **Base** : `https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/`
-  - `stations` — référentiel (filtres `bbox`, `code_commune`, `code_departement`, `code_bss`…) ; champs dont `code_commune_insee`, coordonnées.
-  - `chroniques` — historique des niveaux (pour la **climatologie**), par `code_bss`.
-  - `chroniques_tr` — **quasi temps réel horaire** (~1700 piézomètres télétransmis).
-- **Jointure** : par `code_bss`. Mises à jour ADES intégrées **quotidiennement**.
-- **Indicateur** : calculer un **IPS** (Indicateur Piézométrique Standardisé, méthode BRGM) — niveau courant rapporté à la distribution mensuelle historique (idéalement ≥ 30 ans, acceptable 15 ans). Cohérent par construction avec le SPI/SSWI. Stocker, par station, les **stats mensuelles** + la valeur courante ; recalcul incrémental.
-- **Pièges** : couverture **inégale** → l'IPS est un **raffinement local** ; le SWI (grille 8 km, couverture totale) reste le signal dynamique **universel**. Paginer poliment (`size`, `page`), cacher, borner par département.
+*Vérifié live (API v1.4.3, mai 2026). Licence Ouverte 2.0 — ADES/BRGM (OFB). Doc : `hubeau.eaufrance.fr/page/api-piezometrie`, OpenAPI `…/niveaux_nappes/api-docs`.*
+- **Base** : `https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/` (formats `json`/`geojson`/`csv`).
+  - `stations` — référentiel **national ~23 308 stations** (dont ~5800 actives/exploitables). Filtres **fonctionnels** : `code_departement`, `code_commune`, `bbox`, `code_bss`, `nb_mesures_min`. Champs : `code_bss`, `code_commune_insee`, `x`/`y` (**WGS84, lon=x/lat=y** → reproj 2154 `always_xy`), `date_debut/fin_mesure`, `nb_mesures_piezo`, `codes_bdlisa`, `profondeur_investigation`.
+  - `chroniques` — historique des niveaux (pour la **climatologie**). Champ niveau = **`niveau_nappe_eau`** (cote **NGF**, m) ; aussi `profondeur_nappe` (m sous le sol, **signe inverse**). `date_debut/fin_mesure` fonctionnels.
+  - `chroniques_tr` — **temps réel horaire** (**~1 400 piézomètres** télétransmis), champ **`niveau_eau_ngf`** (même référentiel NGF), **~3 mois d'historique seulement**.
+- **⚠️ Piège majeur** : `chroniques` et `chroniques_tr` **IGNORENT silencieusement tout filtre géographique** (`code_departement`/`code_commune` renvoient les ~25 M lignes nationales, **sans erreur 400**) → lister d'abord les `code_bss` via `stations?code_departement=`, puis **boucler par `code_bss`** (jamais de `chroniques` sans `code_bss`). Pagination plafond **dur `page×size ≤ 20000`**, URL ≤ 2083 car, **pas de curseur** → fenêtrer par dates au-delà.
+- **Signe** : NGF élevé = nappe haute = **humide** (anomalie négative = sec). Standardiser le **NGF** (`niveau_nappe_eau`) ; `profondeur_nappe` aurait le signe inverse.
+- **Indicateur** : **IPS** (Indicateur Piézométrique Standardisé) **non servi par l'API → recalcul** (méthode BRGM Seguin 2014/RP-67249 : climatologie mensuelle par `code_bss` → **NQT** → quantile normal ; 7 classes ; ≥ 15 ans, idéal ≥ 30). Voir `metric.md` et ADR-018. Stocker stats mensuelles + valeur courante ; recalcul incrémental.
+- **Confiance** : couverture **très inégale** → l'IPS est un **raffinement local** (le SWI 8 km reste universel). Pondérer par historique + **libre vs captive** (via `codes_bdlisa` → référentiel BDLISA externe, M2). Paginer poliment (`size`≤20000, séquentiel par `code_bss`), cacher, borner par département.
 
 ## 6. GASPAR — Cat-Nat sécheresse (DGPR) — calibration `H`
 - **Page** : data.gouv `base-nationale-de-gestion-assistee-des-procedures-administratives-relatives-aux-risques-gaspar` (et couche Géorisques « procédures administratives »). CCR publie aussi la liste des arrêtés (J+1/J+2).

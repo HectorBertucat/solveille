@@ -20,19 +20,20 @@ E = clamp01( w_surface * part_alea_moyen_fort
 ### T — Tension hydrique (dynamique, anomalie standardisée)
 Deux signaux **standardisés** (moyenne 0, écart-type 1 sur la climatologie locale), donc directement comparables et cohérents entre eux :
 - **`z_SWI`** : anomalie standardisée du SWI CatNat de la maille (vs sa distribution **du même mois calendaire** sur l'historique). `z_SWI = (swi_t − μ_maille,mois)/σ_maille,mois`. Sécheresse ⇒ `z_SWI` négatif.
-- **`z_IPS`** (v1.1) : IPS du/des piézomètre(s) représentatif(s) de la commune (niveau courant rapporté à la distribution mensuelle historique). Sécheresse ⇒ `z_IPS` négatif.
+- **`z_IPS`** (v1.1, Hub'eau/ADES) : niveau de nappe (cote **NGF**) rapporté à la distribution du **même mois calendaire** sur l'historique de la station (≥ 15 ans). NGF haut = nappe haute = humide ⇒ sécheresse ⇒ `z_IPS` négatif. **Deux standardisations stockées** (ADR-018) : `z_ips` **plain** `(niveau − μ_mois)/σ_mois` **pilote `T`** (même méthode que `z_SWI`), et `ips_nqt = Φ⁻¹(rang_Weibull)` (**NQT**, méthode BRGM, N(0,1) par construction) **pilote la classe BRGM** affichée. Les deux sont monotones croissants dans le niveau ⇒ même sens sec/humide.
 
-On convertit en intensité de sécheresse `[0,1]` (1 = très sec) via la **logistique** :
+On convertit en intensité de sécheresse `[0,1]` (1 = très sec) via la **logistique**, puis on combine en **moyenne pondérée** (normalisée — un mois normal reste à 0.5 quel que soit le poids) :
 ```
 sigma(x) = 1 / (1 + exp(-x))
 dry_SWI  = sigma(-GAIN * z_SWI)            # z_SWI<0 (sec) ⇒ dry_SWI→1 ; z=0 ⇒ 0.5
-dry_IPS  = sigma(-GAIN * z_IPS)
-T = w_swi * dry_SWI + w_ips * dry_IPS      # si IPS indisponible : T = dry_SWI
+dry_IPS  = sigma(-GAIN * z_IPS)            # z_IPS = z plain (pas la NQT)
+T = (w_swi * dry_SWI + w_ips * dry_IPS) / (w_swi + w_ips)   # IPS indisponible (w_ips=0) ⇒ T = dry_SWI
 ```
-- **Constantes** (documentées, ajustables) : `GAIN = 1.0` (pente ; `z=−1⇒dry≈0.73`, `z=−2⇒0.88`), `w_swi`/`w_ips` (v1.1, `w_swi=1` tant que pas d'IPS).
+- **Constantes** (documentées, ajustables) : `GAIN = 1.0` (pente ; `z=−1⇒dry≈0.73`, `z=−2⇒0.88`), `w_swi = 1`, **`w_ips = confiance · W_IPS_MAX`** (`W_IPS_MAX = 0.5` ⇒ SWI dominant ; à confiance max l'IPS pèse la moitié du SWI). `confiance ∈ [0,1] = clamp01(f_hist · f_nappe · f_repr)` : `f_hist` 0 si <15 ans, **plancher 0.4 à 15 ans** → 1.0 à 30 ans (un historique de 15 ans est déjà exploitable) ; `f_nappe` (libre 1 / captive 0.5 / inconnu 0.7, BDLISA, M2) ; `f_repr` (1 commune-hôte ; décroît avec la distance, M2). **`confiance = 0` (pas de station / <15 ans) ⇒ `w_ips = 0` ⇒ `T = dry_SWI`.**
+- **Classes BRGM de l'IPS** (`ips_nqt`) : 7 classes aux seuils standard-normaux `[−1.282, −0.842, −0.253, +0.253, +0.842, +1.282]` (= quantiles N(0,1) des percentiles 10/20/40/60/80/90 %) — *Très bas (sec) … Très haut (humide)*. La NQT garantit que ces seuils tombent exactement sur les percentiles mensuels, ce qu'un z plain ne ferait pas sur une distribution de niveaux non-gaussienne — d'où le double calcul (z plain pour `T`, NQT pour la classe).
 - **Mois « normal » ⇒ `T = 0.5`** (z=0) : T module E sans l'annuler — la pression reste à mi-échelle hors anomalie. Un mois sec pousse T→1, un mois humide T→0.
 - **Lissage** : le SWI CatNat est déjà une **moyenne glissante 3 mois** (le nowcast est donc lissé, pas instantané — à afficher).
-- **Climatologie** : μ/σ calculés par (maille, mois calendaire) sur **tout l'historique disponible (1960→)** pour maximiser l'échantillon et la robustesse de σ. *Caveat assumé* : la tendance climatique rend les anomalies récentes légèrement plus « sèches » vs une normale longue — cohérent avec « pression vs normale historique ». Période de référence **paramétrable** (ex. normale 1991-2020) si besoin. σ≈0 (maille quasi constante un mois) ⇒ `z_SWI` NULL+flag.
+- **Climatologie** : μ/σ calculés par (maille, mois calendaire) sur **tout l'historique disponible (1960→)** pour maximiser l'échantillon et la robustesse de σ. *Caveat assumé* : la tendance climatique rend les anomalies récentes légèrement plus « sèches » vs une normale longue — cohérent avec « pression vs normale historique ». Période de référence **paramétrable** (ex. normale 1991-2020) si besoin. σ≈0 (maille quasi constante un mois) ⇒ `z_SWI` NULL+flag. **L'IPS suit la même logique** (climatologie par `code_bss`×mois calendaire sur tout l'historique de la station, paramétrable ; BRGM propose 1981-2010), avec deux caveats v1.1 : (a) la **NQT suppose la stationnarité** de la distribution mensuelle — une nappe en déclin tendanciel paraîtra plus sèche, comme le SWI ; (b) **asymétrie méthodologique assumée** — `z_SWI` est un z plain, `z_IPS` pilotant `T` aussi (cohérence), mais la **classe** IPS vient d'une NQT (N(0,1) exact).
 - **SWI = signal universel** (grille 8 km, couverture totale, variable officielle Cat-Nat). **IPS = raffinement local** là où une station représentative existe → pondération `w_ips` réduite (ou nulle) sans station fiable. Exposer un niveau de **confiance** par commune (présence/qualité de l'IPS).
 
 ### J — Enjeu (statique, € et stock)
