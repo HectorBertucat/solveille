@@ -57,6 +57,12 @@ def test_score_bounds_and_round() -> None:
     assert ip_rga_score(0.5, None) is None
 
 
+def test_score_half_up_matches_duckdb() -> None:
+    # 100·0.5·0.25 = 12.5 → half-up = 13 (et non 12 de l'arrondi bancaire) → parité avec DuckDB.
+    assert ip_rga_score(0.5, 0.25, gamma=1.0) == 13
+    assert ip_rga_score(0.5, 0.75, gamma=1.0) == 38  # 37.5 → 38
+
+
 def test_score_zero_when_e_zero() -> None:
     # E=0 (pas d'argile) ⇒ score 0 quel que soit T (propriété forte).
     for t in (0.0, 0.5, 0.99, 1.0):

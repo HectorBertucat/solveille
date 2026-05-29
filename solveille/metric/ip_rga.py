@@ -116,8 +116,9 @@ def ip_rga_score(e: float | None, t: float | None, *, gamma: float = GAMMA) -> i
     """
     if e is None or t is None:
         return None
-    score = 100.0 * e * (max(t, 0.0) ** gamma)
-    return int(round(clamp01(score / 100.0) * 100.0))
+    bounded = min(100.0, max(0.0, 100.0 * e * (max(t, 0.0) ** gamma)))
+    # arrondi *half-up* (et non bancaire) pour coller à `round()` de DuckDB → parité SQL stricte.
+    return int(math.floor(bounded + 0.5))
 
 
 def niveau_index(score: int | None, seuils: list[float]) -> int | None:
