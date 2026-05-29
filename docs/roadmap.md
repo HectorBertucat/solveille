@@ -18,13 +18,21 @@ Construire dans l'ordre. Chaque incrément doit être démontrable et utile en s
 **Démonstration v0** : « où se concentre la valeur de bâti exposé, et quelles communes changent de classe pour les ventes 2026 ». ✅ **Livré.**
 
 ## v1 — « La boussole » (nowcast dynamique)
-**But** : ajouter la tension hydrique du moment.
-- [ ] Ingestion **SWI CatNat** + climatologie mensuelle/maille → `swi_maille(swi_anomalie)`.
-- [ ] Ingestion **Hub'eau** (`stations` + `chroniques` pour climatologie au 1ᵉʳ run, puis `chroniques_tr` quotidien) → `piezo_ips`.
-- [ ] Rattachement maille SWI ↔ commune et piézo ↔ commune (+ niveau de confiance).
-- [ ] Calcul `T` puis `IP-RGA` (5 niveaux) ; curseur de date dans l'UI.
-- [ ] **systemd timers** (quotidien nappes, mensuel SWI) ; `last_updated_*` exposés.
-- [ ] Tests métier : monotonie (plus sec ⇒ score ≥), `E=0 ⇒ 0`, couverture nationale via SWI.
+**But** : ajouter la tension hydrique du moment. Phasé : **v1.0 = SWI** (signal universel, 100 % des communes) → **v1.1 = IPS Hub'eau** (raffinement local). Voir ADR-015/016/017.
+
+### v1.0 — SWI (la dynamique nationale)
+- [ ] Ingestion **SWI CatNat** (CDN data.gouv `…-catnat`) → `swi_maille`, `swi_grille`.
+- [ ] Climatologie mensuelle/maille (tout l'historique) → anomalie standardisée `z_SWI` (`swi_anomalie`).
+- [ ] Rattachement maille SWI ↔ commune (carré 8 km ∩ commune, pondéré par aire) → `commune_swi`.
+- [ ] Calcul `T = dry_SWI` puis `IP-RGA = round(100·E·T^0.8)` (5 niveaux, quantiles nationaux) → `commune_pression_mensuel` + statique `*_latest`.
+- [ ] **Curseur de date** dans l'UI (niveau IP-RGA par mois en attribut de tuile `n_AAAAMM`) + sparkline de pression dans la fiche.
+- [ ] **systemd timer** mensuel SWI ; `last_updated_swi` exposé.
+- [ ] Tests métier : monotonie (plus sec ⇒ score ≥), `E=0 ⇒ 0`, **couverture nationale 100 % via SWI**, cohérence temporelle (mois sec connu > mois humide).
+
+### v1.1 — IPS Hub'eau (raffinement local)
+- [ ] Ingestion **Hub'eau** (`stations` par dept → `code_bss` ; `chroniques` pour la climatologie ; `chroniques_tr` quotidien) → `piezo_ips` (recalcul IPS, classes BRGM).
+- [ ] Rattachement piézo ↔ commune (+ **niveau de confiance**) ; pondération `w_ips` dans `T`.
+- [ ] **systemd timer** quotidien nappes.
 **Démonstration v1** : carte de pression qui évolue dans le temps, par commune.
 
 ## v2 — « Calibration + agent »

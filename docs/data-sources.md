@@ -22,10 +22,15 @@ Règles communes : reprojeter en **EPSG:2154** dès l'ingestion ; écrire le **b
 - **Pièges** : maille **EPCI** (pas commune) → la descente à la commune est une approximation ; la période de construction sert à pondérer la vulnérabilité.
 
 ## 4. SWI CatNat (Météo-France) — anomalie humidité des sols `T`
-- **Page** : `meteo.data.gouv.fr` — jeu « Données mensuelles d'indice d'humidité des sols pour le dispositif catastrophes naturelles » (aussi sur data.gouv).
-- **Format** : CSV — colonnes `numéro de maille, x (L93), y (L93), date, SWI` ; **pas mensuel** ⇒ valeurs **mensuelles** ; historique depuis **1960** (fichiers groupés par décennies). Licence Ouverte 2.0.
-- **Usage** : par maille 8 km, calculer une **anomalie standardisée** vs la climatologie mensuelle de la maille ; rattacher chaque commune à sa/ses maille(s) (intersection ou centroïde).
-- **⚠️ Important** : configuration SIM **spécifique au dispositif CatNat** → à n'utiliser **que** pour cet usage (c'est exactement le nôtre). Ne pas l'employer pour de l'humidité de surface générique.
+- **Jeu** : data.gouv `donnees-mensuelles-dindice-dhumidite-des-sols-pour-le-dispositif-**catnat**`, id interne `69380f267975cac439339b63`. ⚠️ **Pas** l'homonyme `…-catastrophes-naturelles` (mono-ressource = lien 302 vers un portail JS Météo-France **inutilisable** au fetch). Résoudre les ressources via l'API dataset (`/api/1/datasets/<id>/`) puis télécharger chaque `latest` (`/api/1/datasets/r/<uuid>`, 302 → CDN `static.data.gouv.fr`). Licence Ouverte 2.0, Météo-France.
+- **Ressources** : **7 fichiers `.csv.gz` décennaux** (`swi.196001-196912` … `swi.202001-2025xx`, ~5 Mo chacun) + **1 fichier grille** (`caracteristiques-geographiques-mailles-swi.csv`, ~450 Ko) + un PDF. Seul le fichier de la décennie courante évolue (mensuel) ; les décennies closes sont immuables.
+- **Format SWI** (en-tête réel, **guillemets**) : `"NUMERO";"LAMBX";"LAMBY";"DATE";"SWI_UNIF_MENS"`. Délimiteur `;`, décimal `.`, UTF-8. `DATE` = **`AAAAMM`** (ex. `202504`). **`LAMBX`/`LAMBY` sont déjà en Lambert 93 (EPSG:2154), en mètres** (≡ `lambx93`/`lamby93` de la grille) → **pas de reprojection**. `SWI_UNIF_MENS` = valeur mensuelle = **moyenne glissante 3 mois** des SWI quotidiens. Échelle ~0–1 (0 sec, 1 saturé) mais **déborde un peu** (observé `[-0.04 ; 1.45]`) → **ne pas clamper**, c'est une valeur brute, l'anomalie est à calculer.
+- **Grille** : 5 lignes de commentaire `#` (dont la ligne d'en-tête `#num_maille;lambx;lamby;lambx93;lamby93;lat_dg;lon_dg`). `lambx`/`lamby` = Lambert II étendu en **hectomètres** (ignorer) ; **`lambx93`/`lamby93` = centroïde maille en mètres L93** (à utiliser). Lire avec `comment='#'`, `header=false`, colonnes positionnelles.
+- **Maille** : **8 981 mailles** de **8 km** de côté, fixes. Le jeu ne fournit que des **centroïdes** → reconstruire le carré 8 km (`x93±4000`, `y93±4000`) pour l'intersection surfacique avec la commune.
+- **Couverture / cadence** : mensuel, **depuis 1960-01** (`196001`) jusqu'au mois courant -1/-2 (dernier dispo ~2025-12). Job **mensuel** (re-télécharger seulement la décennie courante). Tracer `last_updated_swi` = `last_modified` de la ressource.
+- **Volumétrie** : ~8981 × 12 × ~66 ans ≈ **7 M lignes** au total (quelques centaines de Mo CSV brut) → trivial pour DuckDB (lit le `.csv.gz` directement).
+- **Usage** : climatologie **par maille et par mois calendaire** (tout l'historique) → anomalie standardisée `z_SWI = (swi − μ_mois)/σ_mois` ; rattacher maille↔commune par aire d'intersection.
+- **⚠️ Important** : configuration SIM **« uniforme » spécifique au dispositif CatNat** → à n'utiliser **que** pour cet usage (c'est exactement le nôtre). Ne pas l'employer pour de l'humidité de surface générique.
 
 ## 5. Hub'eau Piézométrie (BRGM/ADES) — IPS nappes `T`
 - **Base** : `https://hubeau.eaufrance.fr/api/v1/niveaux_nappes/`
