@@ -146,13 +146,20 @@ def _fetch_window(
     )
 
 
+def _lines(code_bss: str, rows: list[dict[str, Any]]) -> str:
+    """Sérialise les mesures en NDJSON (`code_bss` injecté sur chaque ligne)."""
+    return "".join(json.dumps({"code_bss": code_bss, **r}, ensure_ascii=False) + "\n" for r in rows)
+
+
 def fetch_chronique(
     st: dict[str, Any], *, client: httpx.Client, root: Path
 ) -> tuple[Path, int, str]:
-    """Télécharge la chronique complète d'une station (idempotent), écrit le brut.
+    """Télécharge la chronique d'une station (idempotent, **incrémental**), écrit le brut.
 
-    Saute le téléchargement si la chronique cachée couvre déjà le `date_fin_mesure` courant
-    (politesse : pas de re-fetch inutile). Renvoie (chemin, n_mesures, statut).
+    Politesse : si la chronique cachée couvre déjà `date_fin_mesure`, on saute ; si elle est
+    en retard, on ne récupère que **l'incrément** (`[cov.date_fin+1, date_fin]`) qu'on **ajoute**
+    au NDJSON (essentiel pour le refresh quotidien — pas de re-téléchargement de tout l'historique
+    quand une station gagne un point). Renvoie (chemin, n_mesures, statut).
     """
     code_bss = st["code_bss"]
     d_deb = date.fromisoformat(st["date_debut_mesure"][:10])
@@ -162,25 +169,37 @@ def fetch_chronique(
     dest = cdir / f"{_safe(code_bss)}.jsonl"
     marker = dest.with_suffix(".cover.json")
 
-    if dest.exists() and marker.exists():  # cache : déjà couvert jusqu'à date_fin ?
+    if dest.exists() and marker.exists():
         try:
             cov = json.loads(marker.read_text(encoding="utf-8"))
-            if cov.get("date_fin") and date.fromisoformat(cov["date_fin"]) >= d_fin:
-                log.info("piezo.chronique_cached", code_bss=code_bss, n=cov.get("n", 0))
-                return dest, int(cov.get("n") or 0), "cached"
+            cov_fin = date.fromisoformat(cov["date_fin"]) if cov.get("date_fin") else None
         except (json.JSONDecodeError, ValueError):
-            pass
+            cov, cov_fin = {}, None
+        if cov_fin and cov_fin >= d_fin:  # rien de nouveau
+            log.info("piezo.chronique_cached", code_bss=code_bss, n=cov.get("n", 0))
+            return dest, int(cov.get("n") or 0), "cached"
+        if cov_fin and cov_fin < d_fin:  # incrément seulement → on ajoute au NDJSON
+            rows = _fetch_window(code_bss, cov_fin + timedelta(days=1), d_fin, client=client)
+            with dest.open("a", encoding="utf-8") as fh:
+                fh.write(_lines(code_bss, rows))
+            new_n = int(cov.get("n") or 0) + len(rows)
+            marker.write_text(
+                json.dumps(
+                    {
+                        "date_debut": cov.get("date_debut", d_deb.isoformat()),
+                        "date_fin": d_fin.isoformat(),
+                        "n": new_n,
+                    }
+                )
+            )
+            log.info("piezo.chronique_incr", code_bss=code_bss, n_nouveaux=len(rows), n=new_n)
+            return dest, new_n, "incremental"
 
     rows = _fetch_window(code_bss, d_deb, d_fin, client=client)
-    # NDJSON (1 mesure/ligne), `code_bss` injecté sur chaque ligne (le staging groupe dessus).
-    dest.write_text(
-        "".join(
-            json.dumps({"code_bss": code_bss, **r}, ensure_ascii=False) + "\n" for r in rows
-        ),
-        encoding="utf-8",
+    dest.write_text(_lines(code_bss, rows), encoding="utf-8")
+    marker.write_text(
+        json.dumps({"date_debut": d_deb.isoformat(), "date_fin": d_fin.isoformat(), "n": len(rows)})
     )
-    cover = {"date_debut": d_deb.isoformat(), "date_fin": d_fin.isoformat(), "n": len(rows)}
-    marker.write_text(json.dumps(cover), encoding="utf-8")
     log.info("piezo.chronique", code_bss=code_bss, n=len(rows))
     return dest, len(rows), "downloaded"
 
@@ -206,7 +225,7 @@ def fetch() -> RawDataset:
                 files.append(path)
                 n_chron += 1
                 n_obs += n
-                if status == "downloaded":
+                if status in ("downloaded", "incremental"):
                     time.sleep(pause)  # politesse : pause seulement sur les vrais GET
 
     manifest = write_manifest(

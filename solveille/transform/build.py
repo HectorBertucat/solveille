@@ -90,9 +90,29 @@ def refresh_swi() -> None:
     log.info("build.refresh_swi.done")
 
 
+def refresh_piezo() -> None:
+    """Refresh IPS léger (quotidien) : réutilise le staging v0 + SWI + climatologie SWI.
+
+    Re-traite la chaîne piézo (staging stations/mensuel → IPS → `commune_ips`) puis les marts,
+    en réutilisant `commune_swi` (mensuel, non recalculé ici). À enchaîner avec `make tiles`.
+    Le brut piézo doit être rafraîchi avant (`make fetch-piezo`, incrémental). Skip propre si
+    le brut est absent.
+    """
+    log.info("build.refresh_piezo.start")
+    if not build_piezo_chain():
+        log.warning("build.refresh_piezo.no_raw")  # pas de fetch-piezo → rien à faire
+        return
+    mart.build_commune_pression_mensuel()
+    mart.build_commune_pression()
+    log.info("build.refresh_piezo.done")
+
+
 def main() -> None:
-    if len(sys.argv) > 1 and sys.argv[1] == "swi":
+    arg = sys.argv[1] if len(sys.argv) > 1 else ""
+    if arg == "swi":
         refresh_swi()
+    elif arg == "piezo":
+        refresh_piezo()
     else:
         build_all()
 

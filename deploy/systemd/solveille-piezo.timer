@@ -1,0 +1,13 @@
+[Unit]
+Description=Solveille — déclencheur quotidien IPS nappes (ADES intègre les niveaux ~quotidiennement)
+
+[Timer]
+# Tous les jours à 05:30 (décalé du refresh SWI mensuel du 5 à 04:00 pour ne pas se chevaucher ;
+# de toute façon un flock partagé sérialise les deux refreshs qui touchent marts/tuiles).
+OnCalendar=*-*-* 05:30:00
+# Rattrape un déclenchement manqué (VM éteinte) ; délai aléatoire pour lisser la charge réseau.
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
