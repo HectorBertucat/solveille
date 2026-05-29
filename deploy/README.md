@@ -44,9 +44,12 @@ systemctl daemon-reload && systemctl enable --now solveille-swi.timer
 systemctl list-timers solveille-swi.timer
 ```
 
-### Cloudflare Tunnel (action manuelle, côté dashboard)
-Ajouter une route **`solveille.<domaine> → http://localhost:8083`** dans le tunnel Cloudflare de la VM
-(comme `chronocatalog.hectorb.fr → :8082`). C'est la seule étape non automatisable ici (accès Cloudflare).
+### Cloudflare Tunnel (action manuelle, côté dashboard) — fait
+Public hostname **`argile.hectorb.fr → http://localhost:8083`** ajoutée sur le tunnel **généraliste**
+de la VM (celui qui sert déjà `fittrack.hectorb.fr`, connecteur *HEALTHY* = `cloudflared.service`).
+⚠️ DNS + ingress doivent être sur **le même tunnel actif** (un hostname posé sur un tunnel sans
+connecteur sur la VM → **Error 1033**). Service = **HTTP** (Caddy sert en clair sur `:8083`), pas HTTPS.
+Site live : <https://argile.hectorb.fr>.
 
 ## CI/CD — secrets GitHub à définir
 

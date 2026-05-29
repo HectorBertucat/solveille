@@ -34,6 +34,11 @@ national ~10 min ; SWI ~30 Mo, rapide).
 **Chiffres v1.0 :** 34 746 communes × 108 mois (2017-01→2025-12) ; seuils [24,35,47,61] ;
 août 2022 (sécheresse) = pression nationale max (z̄ −1.44), 2024 humide.
 
+**Prod :** déployé sur la VM (Ubuntu 24.04, partagée) — `solveille-api.service` (uvicorn 127.0.0.1:8001),
+Caddy `:8083`, Cloudflare Tunnel → **<https://argile.hectorb.fr>**. CI/CD GitHub Actions (`.github/workflows/ci.yml`) :
+push `main` → lint+types+tests → déploiement SSH (git reset + uv sync + restart). Timer `solveille-swi`
+mensuel (refresh SWI léger `make build-swi`). Secrets `DEPLOY_*` posés. Voir `deploy/README.md`.
+
 **Décisions clés v1 (ADR-015/016/017, `docs/metric.md`) :**
 - SWI via CDN data.gouv (PAS le portail JS) ; `LAMBX/LAMBY` déjà en L93 ; grille pour la géométrie.
 - Mart **temporel** split statique/mensuel ; niveau-par-mois en attribut de tuile pour le curseur.
@@ -72,3 +77,13 @@ signal universel (couverture 100 %) ; l'IPS affine localement.
 
 **Garde-fous :** EPSG:2154 ; Hub'eau poli (cache + bornage dept, pas de matraquage, plafond 20000) ;
 indice indicatif ; petits commits atomiques ; rien de destructif sans accord. Itérer Occitanie puis national.
+
+---
+
+## Prompt de démarrage (à coller dans la nouvelle session)
+
+> Tu reprends **Solveille** après la livraison du **v1.0** (boussole SWI, complète + testée + **déployée en prod sur <https://argile.hectorb.fr>**, CI/CD GitHub Actions active).
+> 1. Lis `AGENTS.md`, `docs/03-START-V1.1.md`, `docs/metric.md`, `docs/data-sources.md` (§5 Hub'eau), `docs/decisions.md` (ADR-015→017). Ne relis pas tout le code : il est commité et stable.
+> 2. Passe en **plan mode** et propose le plan du **v1.1 « IPS Hub'eau »** : vérif source Hub'eau via `data-source-researcher` (AVANT de coder), connecteurs `stations`/`chroniques`/`chroniques_tr`, **recalcul IPS** (climatologie mensuelle par `code_bss`, classes BRGM, ≥15 ans), rattachement piézo↔commune + **niveau de confiance**, branchement `w_ips` dans `T` (les colonnes `z_ips`/`dry_ips` du mart mensuel sont déjà réservées, NULL), **timer quotidien** nappes, tests (IPS standardisé, `T=dry_SWI` si pas de station, monotonie préservée). N'écris pas de code avant validation.
+> 3. Effort élevé sur l'IPS/climatologie ; subagents read-only (`data-source-researcher`, `geo-duckdb-reviewer`, `metric-validator`) ; pousse-moi si une hypothèse est fragile. Itère Occitanie puis national.
+> Première livraison v1.1 attendue : un IPS par `code_bss` contrôlé (centré-réduit, classes BRGM) rattaché aux communes, avec un test de cohérence.

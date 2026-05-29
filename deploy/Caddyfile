@@ -1,5 +1,6 @@
 # Solveille — servi derrière Cloudflare Tunnel (modèle des autres apps de la VM).
-# Caddy écoute :8083 ; route tunnel à créer côté Cloudflare : solveille.<domaine> → http://localhost:8083
+# Caddy écoute :8083 ; route Cloudflare Tunnel (sur le tunnel « généraliste ») :
+#   argile.hectorb.fr → http://localhost:8083  (public hostname ajouté côté dashboard)
 # Importé par /etc/caddy/Caddyfile :  import /opt/solveille/deploy/Caddyfile
 :8083 {
 	encode zstd gzip
