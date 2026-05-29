@@ -4,18 +4,18 @@ Construire dans l'ordre. Chaque incrément doit être démontrable et utile en s
 
 ## v0 — « La carte de l'enjeu » (ship rapide, sans dynamique)
 **But** : carte nationale + fiche commune montrant l'exposition argile et l'enjeu, sans la météo.
-- [ ] `make setup` : venv (uv), deps, extensions DuckDB (`spatial`,`httpfs`).
-- [ ] Ingestion **ADMIN EXPRESS** → `commune(geom_2154)`.
-- [ ] Ingestion **RGA 2026** → intersection → `commune_rga(part_alea_*, classe_dominante)`.
-- [ ] Ingestion **communes basculées 2026** → `commune.basculement_2026`.
-- [ ] Ingestion **Fideli EPCI** → `epci_stock` → descente commune (clé documentée).
-- [ ] Ingestion **DVF** → `commune_dvf(prix_median_maison, n_tx_*)` (agrégats only).
-- [ ] Calcul `E` et `J` → `commune_pression` (sans `T`).
-- [ ] **PMTiles** (tippecanoe) + **MapLibre** : choroplèthe `E`/enjeu + mise en avant des communes reclassées.
-- [ ] **FastAPI** : `/communes/{insee}`, `/meta`.
-- [ ] Tests : schéma connecteurs, contrats de données (volumétrie/nulls/SRS), `E∈[0,1]`.
-- [ ] Bandeau de cadrage + `noindex`.
-**Démonstration v0** : « où se concentre la valeur de bâti exposé, et quelles communes changent de classe pour les ventes 2026 ».
+- [x] `make setup` : venv (uv), deps, extensions DuckDB (`spatial`,`httpfs`).
+- [x] Ingestion **ADMIN EXPRESS** → `commune(geom_2154)` (GPKG v4, 34 746 communes).
+- [x] Ingestion **RGA 2026** → intersection → `commune_rga(part_alea_*, classe_dominante)` (FeatureServer, repli validé).
+- [x] Ingestion **communes basculées 2026** → `commune.basculement_2026` (133 communes).
+- [x] Ingestion **Fideli EPCI** → `epci_stock` → descente commune (clé stock INSEE × exposition).
+- [x] Ingestion **DVF** → `commune_dvf(prix_median_maison, n_tx_*)` (agrégats only).
+- [x] Calcul `E` et `J` → `commune_pression` (sans `T`). National : ~1954 Md€ de bâti exposé.
+- [x] **PMTiles** (tippecanoe) + **MapLibre** : choroplèthe `E` + mise en avant des communes reclassées.
+- [x] **FastAPI** : `/communes/{insee}`, `/meta` (+ service statique front/tuiles).
+- [x] Tests : schéma connecteurs, contrats de données (volumétrie/nulls/SRS), `E∈[0,1]` (43 tests).
+- [x] Bandeau de cadrage + `noindex`.
+**Démonstration v0** : « où se concentre la valeur de bâti exposé, et quelles communes changent de classe pour les ventes 2026 ». ✅ **Livré.**
 
 ## v1 — « La boussole » (nowcast dynamique)
 **But** : ajouter la tension hydrique du moment.
