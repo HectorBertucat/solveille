@@ -56,7 +56,7 @@ solveille/
 
 ## Déploiement (VM Ubuntu 4 vCPU / 8 Go / 80 Go / 20 To)
 - Reverse proxy **Caddy** (TLS auto) → uvicorn + statique (front + PMTiles).
-- **systemd timers** pour les ingestions (cf. cadences). Jobs idempotents, verrou simple anti-chevauchement.
+- **systemd timers** pour les ingestions (cf. cadences). Jobs idempotents, verrou simple anti-chevauchement. Templates dans `deploy/` : `solveille-swi.{service,timer}` (SWI mensuel, v1.0) + `deploy/run-refresh.sh` (`make fetch-swi build tiles` sous `flock`) ; le timer quotidien nappes Hub'eau viendra en v1.1.
 - Budgets : stockage < 80 Go (DVF→Parquet, SWI/piézo agrégés, PMTiles compact) ; RAM 8 Go OK avec DuckDB en streaming (éviter de tout charger en mémoire — préférer requêtes sur Parquet) ; egress trivial.
 - Sauvegarde légère : `data/marts/` + manifestes (le brut est re-téléchargeable).
 

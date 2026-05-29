@@ -1,0 +1,12 @@
+[Unit]
+Description=Solveille — déclencheur mensuel SWI (SWI CatNat publié ~mensuellement)
+
+[Timer]
+# Le 5 de chaque mois à 04:00 (après le décalage de publication Météo-France).
+OnCalendar=*-*-05 04:00:00
+# Rattrape un déclenchement manqué (VM éteinte) ; délai aléatoire pour lisser la charge réseau.
+Persistent=true
+RandomizedDelaySec=1800
+
+[Install]
+WantedBy=timers.target
