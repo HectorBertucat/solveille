@@ -1,0 +1,17 @@
+# Solveille — servi derrière Cloudflare Tunnel (modèle des autres apps de la VM).
+# Caddy écoute :8083 ; route tunnel à créer côté Cloudflare : solveille.<domaine> → http://localhost:8083
+# Importé par /etc/caddy/Caddyfile :  import /opt/solveille/deploy/Caddyfile
+:8083 {
+	encode zstd gzip
+
+	# uvicorn (solveille-api.service) sert l'API + le front + les PMTiles sur 127.0.0.1:8001.
+	reverse_proxy localhost:8001
+
+	header {
+		X-Frame-Options "DENY"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+	# Note : l'en-tête noindex (garde-fou DVF) est posé par l'app FastAPI et traverse Caddy.
+}

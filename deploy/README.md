@@ -1,36 +1,65 @@
-# Déploiement — timers systemd
+# Déploiement — VM Ubuntu (Caddy + Cloudflare Tunnel) & CI/CD
 
-Artefacts de déploiement (VM Ubuntu, cf. `docs/architecture.md`). **Non exécutés par le repo** :
-à installer sur la VM. Idempotents et polis (cache + bornage côté connecteurs).
+VM partagée (cf. `docs/architecture.md`) : chaque app fournit son `deploy/Caddyfile` (importé par
+`/etc/caddy/Caddyfile`), tourne en service systemd, et est exposée via **Cloudflare Tunnel**.
+Solveille suit ce modèle **sans toucher aux autres apps**.
 
-## SWI mensuel (v1.0)
+Composants :
+- `solveille-api.service` — uvicorn (FastAPI) sur `127.0.0.1:8001`, sert API + front + PMTiles.
+- `deploy/Caddyfile` — bloc `:8083` → `reverse_proxy localhost:8001` (importé par le Caddyfile global).
+- `solveille-swi.{service,timer}` — refresh SWI **mensuel** (`deploy/run-refresh.sh` = `make fetch-swi build-swi tiles`, sous `flock`).
+- CI/CD GitHub Actions (`.github/workflows/ci.yml`) : lint+types+tests, puis **déploiement SSH** sur push `main`.
 
-`solveille-swi.timer` → `solveille-swi.service` → `deploy/run-refresh.sh` :
-`make fetch-swi build tiles` (ré-ingestion de la décennie courante, recalcul du mart, PMTiles),
-sous verrou `flock` (anti-chevauchement).
-
-### Installation
+## Bootstrap (une fois)
 
 ```bash
-# 1. Code en /opt/solveille (ou adapter SOLVEILLE_REPO + WorkingDirectory dans le .service)
-sudo useradd --system --home /opt/solveille solveille     # ou un user dédié existant
-sudo chown -R solveille:solveille /opt/solveille
-chmod +x /opt/solveille/deploy/run-refresh.sh
+# Outils
+curl -LsSf https://astral.sh/uv/install.sh | sh           # uv
+ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv            # uv sur le PATH des shells non-login (CI)
+apt-get update && apt-get install -y tippecanoe           # PMTiles (dispo en 2.49 sur Ubuntu 24.04)
 
-# 2. Installer les unités
-sudo cp /opt/solveille/deploy/systemd/solveille-swi.{service,timer} /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable --now solveille-swi.timer
+# Code
+git clone https://github.com/HectorBertucat/solveille.git /opt/solveille
+cd /opt/solveille && uv sync --locked
 
-# 3. Vérifier
+# Données : seed poli (pas de re-fetch national RGA/DVF — on rsync les staging dérivés
+# depuis une machine qui les a déjà), puis SWI + mart + tuiles :
+#   (depuis le poste local)  rsync -az data/staging/ root@<vm>:/opt/solveille/data/staging/
+cd /opt/solveille && make fetch-swi && make build-swi && make tiles
+
+# Service API
+cp deploy/systemd/solveille-api.service /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now solveille-api
+curl -fsS localhost:8001/healthz                          # {"status":"ok"}
+
+# Reverse proxy : ajouter l'import au Caddyfile global, sans toucher aux autres blocs
+grep -q '/opt/solveille/deploy/Caddyfile' /etc/caddy/Caddyfile \
+  || echo 'import /opt/solveille/deploy/Caddyfile' >> /etc/caddy/Caddyfile
+systemctl reload caddy
+curl -fsS -H 'Host: solveille' localhost:8083/healthz     # via Caddy
+
+# Timer SWI mensuel
+cp deploy/systemd/solveille-swi.{service,timer} /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now solveille-swi.timer
 systemctl list-timers solveille-swi.timer
-sudo systemctl start solveille-swi.service   # lancement manuel (test)
-journalctl -u solveille-swi.service -f
 ```
 
-Cadence : le 5 de chaque mois à 04:00 (`OnCalendar`), `Persistent=true` rattrape un run manqué.
+### Cloudflare Tunnel (action manuelle, côté dashboard)
+Ajouter une route **`solveille.<domaine> → http://localhost:8083`** dans le tunnel Cloudflare de la VM
+(comme `chronocatalog.hectorb.fr → :8082`). C'est la seule étape non automatisable ici (accès Cloudflare).
 
-## Nappes quotidiennes (v1.1)
+## CI/CD — secrets GitHub à définir
 
-Le timer quotidien Hub'eau (`fetch-piezo`) sera ajouté avec l'IPS (v1.1) : `solveille-piezo.timer`
-(quotidien) + recalcul incrémental de la valeur courante. Voir `docs/roadmap.md`.
+`Settings → Secrets and variables → Actions` (ou via `gh secret set`) :
+
+| Secret | Valeur |
+|---|---|
+| `DEPLOY_SSH_KEY` | clé privée **dédiée** au déploiement (ed25519, sans passphrase) ; sa clé publique est dans `~/.ssh/authorized_keys` de la VM |
+| `DEPLOY_HOST` | IP/host de la VM |
+| `DEPLOY_USER` | `root` |
+| `DEPLOY_KNOWN_HOSTS` | sortie de `ssh-keyscan -t ed25519 <host>` (épingle l'empreinte serveur) |
+
+Sur push `main` : la CI lance lint+types+tests, puis (si vert) le job `deploy` se connecte en SSH,
+fait `git reset --hard origin/main` + `uv sync --locked` + `systemctl restart solveille-api`
+(`deploy/server-deploy.sh`). **Le déploiement ne rebuild pas les données** — c'est le rôle du timer SWI.
+Un changement de schéma de mart nécessite un `deploy/run-refresh.sh` manuel après déploiement.

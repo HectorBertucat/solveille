@@ -1,0 +1,27 @@
+[Unit]
+Description=Solveille API (FastAPI/uvicorn — sert l'API + le front + les PMTiles)
+Documentation=https://github.com/HectorBertucat/solveille
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/solveille
+Environment=PYTHONUNBUFFERED=1
+Environment=SOLVEILLE_DATA_DIR=/opt/solveille/data
+# venv créé par `uv sync` au déploiement (cf. deploy/README.md).
+ExecStart=/opt/solveille/.venv/bin/uvicorn solveille.api.main:app --host 127.0.0.1 --port 8001
+Restart=on-failure
+RestartSec=10s
+StandardOutput=journal
+StandardError=journal
+
+# Durcissement (FS en lecture seule sauf /opt/solveille/data, écrit par le pipeline).
+ProtectSystem=full
+ProtectHome=yes
+PrivateTmp=yes
+NoNewPrivileges=yes
+ReadWritePaths=/opt/solveille
+
+[Install]
+WantedBy=multi-user.target

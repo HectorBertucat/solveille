@@ -6,10 +6,10 @@ Wants=network-online.target
 
 [Service]
 Type=oneshot
-# Adapter User/Group et les chemins au déploiement réel (cf. deploy/README.md).
-User=solveille
-Group=solveille
+User=root
+Group=root
 Environment=SOLVEILLE_REPO=/opt/solveille
+Environment=SOLVEILLE_DATA_DIR=/opt/solveille/data
 WorkingDirectory=/opt/solveille
 ExecStart=/opt/solveille/deploy/run-refresh.sh
 Nice=10
