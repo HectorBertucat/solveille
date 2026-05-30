@@ -72,7 +72,9 @@ def test_piezo_ips_parity_and_centered_reduced(mensuel_parquet: Path, tmp_path: 
     try:
         # served_from très ancien → toutes les lignes sorties (pour vérifier le centré-réduit).
         out = piezo_ips.build_piezo_ips(
-            con, mensuel_parquet=mensuel_parquet, out=tmp_path / "ips.parquet",
+            con,
+            mensuel_parquet=mensuel_parquet,
+            out=tmp_path / "ips.parquet",
             served_from="2000-01-01",
         )
         got = con.execute(
@@ -86,7 +88,7 @@ def test_piezo_ips_parity_and_centered_reduced(mensuel_parquet: Path, tmp_path: 
     by_key = {(c, d): (z, nqt, cl, n) for c, d, z, nqt, cl, n in got}
 
     # Parité SQL ↔ Python sur S1 (z plain + NQT) pour chaque mois.
-    for (c, d, ngf) in rows:
+    for c, d, ngf in rows:
         if c != "S1":
             continue
         h = _hist(rows, "S1", int(d[5:7]))
@@ -107,7 +109,9 @@ def test_piezo_ips_coherence_dry_month_and_gating(mensuel_parquet: Path, tmp_pat
     con = duckdb_io.connect()
     try:
         out = piezo_ips.build_piezo_ips(
-            con, mensuel_parquet=mensuel_parquet, out=tmp_path / "ips.parquet",
+            con,
+            mensuel_parquet=mensuel_parquet,
+            out=tmp_path / "ips.parquet",
         )  # served_from par défaut (2017→) : août 2022 est dans la fenêtre
         dry = con.execute(
             f"""SELECT z_ips, ips_classe FROM read_parquet('{out}')
@@ -136,8 +140,8 @@ _COMMUNES = [
 ]
 # (code_bss, code_commune_insee, code_departement, span_annees, WKT point)
 _STATIONS = [
-    ("S1", "C1", "99", 20.0, "POINT(1000 1000)"),   # dans C1 (spatial) → confiance 0.6
-    ("S5", "C1", "99", 30.0, "POINT(1500 1500)"),   # dans C1 (spatial) → confiance 1.0
+    ("S1", "C1", "99", 20.0, "POINT(1000 1000)"),  # dans C1 (spatial) → confiance 0.6
+    ("S5", "C1", "99", 30.0, "POINT(1500 1500)"),  # dans C1 (spatial) → confiance 1.0
     ("S3", "C2", "99", 30.0, "POINT(50000 50000)"),  # hors polygones → repli INSEE vers C2
     ("S4", None, "99", 30.0, "POINT(60000 60000)"),  # hors + pas d'INSEE → orpheline
 ]
@@ -251,8 +255,12 @@ def test_commune_ips_representativity_radius(tmp_path: Path) -> None:
             f"TO '{ips}' (FORMAT PARQUET);"
         )
         out = piezo_ips.build_commune_ips(
-            con, stations_parquet=stations, piezo_ips_parquet=ips, commune_parquet=commune,
-            out=tmp_path / "commune_ips.parquet", radius_m=10000.0,
+            con,
+            stations_parquet=stations,
+            piezo_ips_parquet=ips,
+            commune_parquet=commune,
+            out=tmp_path / "commune_ips.parquet",
+            radius_m=10000.0,
         )
         res = {
             i: round(c, 4)
