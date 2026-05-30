@@ -13,6 +13,17 @@ const SRC_LAYER = "communes";
 const GREY = "#e8e8e8";
 const NIVEAU_COLORS = { 1: "#ffffb2", 2: "#fecc5c", 3: "#fd8d3c", 4: "#f03b20", 5: "#bd0026" };
 const NIVEAU_LABELS = { 1: "Très faible", 2: "Faible", 3: "Modérée", 4: "Élevée", 5: "Très élevée" };
+
+// Classes BRGM de l'IPS (niveau de nappe, 0 sec → 6 humide) — palette divergente brun↔teal.
+const IPS_CLASS_LABELS = ["Très bas", "Bas", "Modérément bas", "Autour de la moyenne",
+                          "Modérément haut", "Haut", "Très haut"];
+const IPS_CLASS_BG = ["#8c510a", "#d8b365", "#f6e8c3", "#f5f5f5", "#c7eae5", "#5ab4ac", "#01665e"];
+const IPS_CLASS_FG = ["#fff", "#1a1a2e", "#1a1a2e", "#1a1a2e", "#1a1a2e", "#1a1a2e", "#fff"];
+// Part max de l'IPS dans T (= w_ips_max/(1+w_ips_max), w_ips_max=0.5) → normalise confiance_t.
+const IPS_CONF_MAX = 1 / 3;
+function ipsClasseInfo(c) {
+  return { label: IPS_CLASS_LABELS[c] || "—", bg: IPS_CLASS_BG[c] || GREY, fg: IPS_CLASS_FG[c] || "#1a1a2e" };
+}
 const FR_MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin",
                    "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 
@@ -36,7 +47,7 @@ const map = new maplibregl.Map({
         type: "raster",
         tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],
         tileSize: 256,
-        attribution: "© OpenStreetMap, © CARTO — RGA: Géorisques/BRGM · SWI: Météo-France · DVF: DGFiP/Etalab · IGN · Insee · SDES",
+        attribution: "© OpenStreetMap, © CARTO — RGA: Géorisques/BRGM · SWI: Météo-France · Nappes: Hub'eau/ADES-BRGM · DVF: DGFiP/Etalab · IGN · Insee · SDES",
       },
       communes: { type: "vector", url: PMTILES_URL },
     },
@@ -255,6 +266,28 @@ async function renderFiche() {
         ? `${f.rga_classe_2020}→${f.rga_classe_2026} (${(f.bascule_type || "").replace(/_/g, " ")})`
         : "non"),
     );
+    // Corroboration nappe (IPS) — affichée là où une station piézométrique est représentative.
+    if (f.confiance_t > 0 && f.ips_classe != null) {
+      const ic = ipsClasseInfo(f.ips_classe);
+      const ratio = Math.min(1, f.confiance_t / IPS_CONF_MAX);
+      const confLbl = ratio >= 0.66 ? "forte" : ratio >= 0.33 ? "modérée" : "faible";
+      const renforce = f.dry_ips != null && f.dry_swi != null && f.dry_ips > f.dry_swi;
+      const blk = elt("div", { class: "ips-block" });
+      const headIps = elt("div", { class: "ips-head" });
+      headIps.append(elt("span", { class: "k", text: "Nappe (IPS local)" }));
+      const chip = elt("span", { class: "ips-chip", text: ic.label });
+      chip.style.background = ic.bg;
+      chip.style.color = ic.fg;
+      headIps.append(chip);
+      blk.append(headIps);
+      blk.append(elt("div", {
+        class: "ips-note",
+        text: "Corroboration piézométrique " + confLbl + " — le niveau des nappes "
+          + (renforce ? "renforce" : "tempère") + " la tension du sol. "
+          + "IPS standardisé recalculé (Hub'eau / ADES-BRGM), mis à jour quotidiennement.",
+      }));
+      body.append(blk);
+    }
     if (f.has_rga_coverage === false) {
       body.append(elt("div", {
         class: "note",
@@ -263,8 +296,9 @@ async function renderFiche() {
     }
     body.append(elt("div", {
       class: "note",
-      text: "Pression = exposition × sécheresse du moment (SWI, nowcast lissé 3 mois, anomalie vs "
-        + "normale 1960→). Indice indicatif. Sources : Géorisques/BRGM, Météo-France, IGN, Insee, "
+      text: "Pression = exposition argile × sécheresse du moment (SWI sol, nowcast lissé 3 mois ; "
+        + "+ IPS nappes là où une station est représentative). Indice indicatif. Sources : "
+        + "Géorisques/BRGM, Météo-France (SWI), Hub'eau/ADES-BRGM (nappes), IGN, Insee, "
         + "SDES/Fidéli, DGFiP/Etalab. Agrégats communaux (DVF).",
     }));
     slot.replaceWith(body);
