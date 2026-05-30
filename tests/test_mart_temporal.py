@@ -164,6 +164,24 @@ def test_ips_blended_into_t_and_confiance(mensuel_ips: Path) -> None:
     assert rows["2024-06-01"][3] == pytest.approx(-2.0)  # z_ips rempli (plus NULL)
 
 
+def test_ips_classe_binned_in_mart(mensuel_ips: Path) -> None:
+    con = duckdb_io.connect()
+    try:
+        rows = {
+            d: c
+            for d, c in con.execute(
+                f"SELECT date_mois::VARCHAR, ips_classe FROM read_parquet('{mensuel_ips}') "
+                f"WHERE insee='X' ORDER BY date_mois"
+            ).fetchall()
+        }
+    finally:
+        con.close()
+    # ips_nqt −2 → classe 0 (Très bas/sec) ; 0 → classe 3 (Autour moyenne) ; +2 → classe 6 (humide).
+    assert rows["2024-06-01"] == 0
+    assert rows["2024-07-01"] == 3
+    assert rows["2024-08-01"] == 6
+
+
 def test_niveau_present_for_exposed(mensuel: Path) -> None:
     con = duckdb_io.connect()
     try:

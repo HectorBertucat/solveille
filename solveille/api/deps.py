@@ -22,6 +22,7 @@ _MENSUEL_COLS = (
     "dry_swi",
     "z_ips",
     "dry_ips",
+    "ips_classe",
     "T",
     "confiance_t",
     "ip_rga_score",
@@ -74,7 +75,12 @@ def fetch_commune(insee: str, mois: str | None = None) -> dict[str, Any] | None:
 
         mp = mensuel_path()
         if mp.exists():
-            sel = "date_mois, " + ", ".join(_MENSUEL_COLS)
+            # Tolérant au schéma : on ne sélectionne que les colonnes présentes (le code peut
+            # être déployé avant que le mart soit reconstruit avec une nouvelle colonne IPS).
+            head = con.execute(f"SELECT * FROM read_parquet('{mp}') LIMIT 0").description
+            present = {c[0] for c in head}
+            mcols = [c for c in _MENSUEL_COLS if c in present]
+            sel = "date_mois, " + ", ".join(mcols)
             if mois:
                 mrow = con.execute(
                     f"SELECT {sel} FROM read_parquet('{mp}') "
@@ -89,7 +95,7 @@ def fetch_commune(insee: str, mois: str | None = None) -> dict[str, Any] | None:
                 ).fetchone()
             if mrow:
                 out["date"] = str(mrow[0])
-                out.update(dict(zip(_MENSUEL_COLS, mrow[1:], strict=True)))
+                out.update(dict(zip(mcols, mrow[1:], strict=True)))
         return out
     finally:
         con.close()
@@ -128,6 +134,12 @@ def fetch_meta() -> dict[str, Any]:
     p = _require_mart()
     con = duckdb.connect()
     try:
+        # Tolérant au schéma : `last_updated_ips` absent si le mart n'a pas encore été reconstruit
+        # avec le code v1.1 (déploiement code/données dissocié).
+        cols0 = {
+            c[0] for c in con.execute(f"SELECT * FROM read_parquet('{p}') LIMIT 0").description
+        }
+        lu_ips = "any_value(last_updated_ips)" if "last_updated_ips" in cols0 else "NULL"
         row = con.execute(
             f"""
             SELECT count(*)                                   AS n_communes,
@@ -142,7 +154,8 @@ def fetch_meta() -> dict[str, Any]:
                    any_value(last_updated_insee)              AS last_updated_insee,
                    any_value(last_updated_fideli)             AS last_updated_fideli,
                    any_value(last_updated_dvf)                AS last_updated_dvf,
-                   any_value(last_updated_swi)                AS last_updated_swi
+                   any_value(last_updated_swi)                AS last_updated_swi,
+                   {lu_ips}                                   AS last_updated_ips
             FROM read_parquet('{p}')
             """
         ).fetchone()
@@ -160,6 +173,7 @@ def fetch_meta() -> dict[str, Any]:
             "last_updated_fideli",
             "last_updated_dvf",
             "last_updated_swi",
+            "last_updated_ips",
         ]
         meta = dict(zip(cols, row, strict=True)) if row else {}
         meta["dernier_mois"] = str(meta["dernier_mois"]) if meta.get("dernier_mois") else None

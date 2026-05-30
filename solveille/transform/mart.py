@@ -24,7 +24,15 @@ from solveille.common import duckdb_io
 from solveille.common.config import get_settings
 from solveille.common.logging import get_logger
 from solveille.common.raw import read_manifest
-from solveille.metric.ip_rga import GAIN, GAMMA, NIVEAU_LABELS, W_BATI, W_IPS_MAX, W_SURFACE
+from solveille.metric.ip_rga import (
+    GAIN,
+    GAMMA,
+    IPS_CLASS_SEUILS,
+    NIVEAU_LABELS,
+    W_BATI,
+    W_IPS_MAX,
+    W_SURFACE,
+)
 
 log = get_logger("solveille.transform.mart")
 
@@ -78,7 +86,8 @@ COPY (
     {lu_insee}                         AS last_updated_insee,
     {lu_fideli}                        AS last_updated_fideli,
     {lu_dvf}                           AS last_updated_dvf,
-    {lu_swi}                           AS last_updated_swi
+    {lu_swi}                           AS last_updated_swi,
+    {lu_ips}                           AS last_updated_ips
   FROM read_parquet('{commune}') c
   LEFT JOIN read_parquet('{commune_rga}')     cr ON cr.code_insee = c.code_insee
   LEFT JOIN read_parquet('{commune_stock}')   cs ON cs.code_insee = c.code_insee
@@ -99,7 +108,7 @@ COPY (
 # (pas de station) ⇒ T = dry_SWI (repli SWI universel). score borné [0,100].
 _MENSUEL_BASE_SQL = """
 CREATE OR REPLACE TEMP TABLE _mensuel AS
-SELECT insee, date_mois, E, z_swi, dry_swi, z_ips, dry_ips, w_ips,
+SELECT insee, date_mois, E, z_swi, dry_swi, z_ips, dry_ips, ips_nqt, w_ips,
        CASE WHEN dry_ips IS NULL OR w_ips <= 0.0 THEN dry_swi
             ELSE (dry_swi + w_ips * dry_ips) / (1.0 + w_ips) END AS T,
        CAST(LEAST(GREATEST(round(100.0 * E * pow(
@@ -112,6 +121,7 @@ FROM (
          (1.0 / (1.0 + exp({gain} * sw.z_swi)))::DOUBLE  AS dry_swi,
          {ips_z}   AS z_ips,
          {ips_dry} AS dry_ips,
+         {ips_nqt} AS ips_nqt,
          {ips_w}   AS w_ips
   FROM read_parquet('{commune_swi}') sw
   LEFT JOIN read_parquet('{commune_rga}')   cr ON cr.code_insee = sw.code_insee
@@ -122,14 +132,16 @@ FROM (
 
 # Niveaux par quantiles : E<=0 (pas d'argile / hors couverture) ⇒ NULL ; sinon bin du score.
 # confiance_t = part de l'IPS dans T = w_ips/(w_swi+w_ips) ∈ [0, W_IPS_MAX/(1+W_IPS_MAX)] ;
-# 0 = SWI seul (signal universel, pas de corroboration piézo locale).
+# 0 = SWI seul (signal universel, pas de corroboration piézo locale). ips_classe = classe BRGM
+# (0 Très bas/sec → 6 Très haut/humide) du niveau de nappe, ou NULL si pas d'IPS.
 _MENSUEL_COPY_SQL = """
 COPY (
   SELECT insee, date_mois, z_swi, dry_swi, z_ips, dry_ips,
          T, ip_rga_score,
          CASE WHEN E <= 0 THEN NULL {code_when} END AS ip_rga_niveau_code,
          CASE WHEN E <= 0 THEN NULL {label_when} END AS ip_rga_niveau,
-         CASE WHEN w_ips <= 0.0 THEN 0.0 ELSE w_ips / (1.0 + w_ips) END AS confiance_t
+         CASE WHEN w_ips <= 0.0 THEN 0.0 ELSE w_ips / (1.0 + w_ips) END AS confiance_t,
+         CASE WHEN ips_nqt IS NULL THEN NULL {classe_when} END AS ips_classe
   FROM _mensuel
 ) TO '{out}' (FORMAT PARQUET);
 """
@@ -165,6 +177,7 @@ def build_commune_pression_mensuel(
             ),
             "ips_z": "ci.z_ips",
             "ips_dry": f"(1.0 / (1.0 + exp({GAIN} * ci.z_ips)))::DOUBLE",
+            "ips_nqt": "ci.ips_nqt",
             "ips_w": f"CASE WHEN ci.z_ips IS NULL THEN 0.0 "
             f"ELSE COALESCE(ci.confiance, 0.0) * {W_IPS_MAX} END",
         }
@@ -173,6 +186,7 @@ def build_commune_pression_mensuel(
             "ips_join": "",
             "ips_z": "CAST(NULL AS DOUBLE)",
             "ips_dry": "CAST(NULL AS DOUBLE)",
+            "ips_nqt": "CAST(NULL AS DOUBLE)",
             "ips_w": "0.0",
         }
 
@@ -205,7 +219,17 @@ def build_commune_pression_mensuel(
             )
             + f" ELSE '{NIVEAU_LABELS[len(seuils)]}'"
         )
-        con.execute(_MENSUEL_COPY_SQL.format(code_when=code_when, label_when=label_when, out=out))
+        # Classe BRGM (0→6) du niveau de nappe communal, binnée sur l'IPS NQT (réplique
+        # metric.ips_classe). Affichée en front ; ne pilote pas le score.
+        classe_when = (
+            " ".join(f"WHEN ips_nqt <= {s} THEN {i}" for i, s in enumerate(IPS_CLASS_SEUILS))
+            + f" ELSE {len(IPS_CLASS_SEUILS)}"
+        )
+        con.execute(
+            _MENSUEL_COPY_SQL.format(
+                code_when=code_when, label_when=label_when, classe_when=classe_when, out=out
+            )
+        )
         seuils_out.write_text(
             json.dumps(
                 {
@@ -289,6 +313,7 @@ def build_commune_pression(
         lu_fideli=_last_updated("fideli_epci"),
         lu_dvf=_last_updated("dvf"),
         lu_swi=_last_updated("swi_catnat"),
+        lu_ips=_last_updated("hubeau_piezo"),
     )
 
     own = con is None

@@ -45,12 +45,16 @@ class CommunePression(BaseModel):
     bascule_type: str | None = None
     z_swi: float | None = None
     dry_swi: float | None = None
+    z_ips: float | None = None
+    dry_ips: float | None = None
+    ips_classe: int | None = None
     T: float | None = None
     confiance_t: float | None = None
     ip_rga_score: float | None = None
     ip_rga_niveau: str | None = None
     ip_rga_niveau_code: int | None = None
     last_updated_swi: str | None = None
+    last_updated_ips: str | None = None
 
 
 class SerieMois(BaseModel):
