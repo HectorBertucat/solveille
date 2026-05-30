@@ -1,0 +1,18 @@
+[Unit]
+Description=Solveille — rafraîchissement quotidien IPS nappes (Hub'eau + mart + tuiles)
+Documentation=https://github.com/hectorbertucat/solveille
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=SOLVEILLE_REPO=/opt/solveille
+Environment=SOLVEILLE_DATA_DIR=/opt/solveille/data
+WorkingDirectory=/opt/solveille
+ExecStart=/opt/solveille/deploy/run-refresh-piezo.sh
+Nice=10
+# Politesse réseau : le connecteur gère backoff + cache + fetch INCRÉMENTAL (pas de
+# re-téléchargement de tout l'historique). Le 1er run (national, full) peut être long.
+TimeoutStartSec=7200

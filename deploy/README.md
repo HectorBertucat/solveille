@@ -8,6 +8,7 @@ Composants :
 - `solveille-api.service` — uvicorn (FastAPI) sur `127.0.0.1:8001`, sert API + front + PMTiles.
 - `deploy/Caddyfile` — bloc `:8083` → `reverse_proxy localhost:8001` (importé par le Caddyfile global).
 - `solveille-swi.{service,timer}` — refresh SWI **mensuel** (`deploy/run-refresh.sh` = `make fetch-swi build-swi tiles`, sous `flock`).
+- `solveille-piezo.{service,timer}` — refresh IPS nappes **quotidien** (`deploy/run-refresh-piezo.sh` = `make fetch-piezo build-piezo tiles`, **flock partagé** avec le refresh SWI car tous deux écrivent marts/tuiles). Fetch Hub'eau **incrémental** (le 1er run, national, télécharge tout l'historique et peut être long ; les suivants ne récupèrent que l'incrément). Borné par `SOLVEILLE_DEPARTEMENTS` (vide = national).
 - CI/CD GitHub Actions (`.github/workflows/ci.yml`) : lint+types+tests, puis **déploiement SSH** sur push `main`.
 
 ## Bootstrap (une fois)
@@ -42,6 +43,12 @@ curl -fsS -H 'Host: solveille' localhost:8083/healthz     # via Caddy
 cp deploy/systemd/solveille-swi.{service,timer} /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now solveille-swi.timer
 systemctl list-timers solveille-swi.timer
+
+# Timer IPS nappes quotidien (1er run national = long, full ; ensuite incrémental)
+cp deploy/systemd/solveille-piezo.{service,timer} /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now solveille-piezo.timer
+systemctl start solveille-piezo.service   # 1er run manuel (full national) — suivre les logs
+systemctl list-timers 'solveille-*'
 ```
 
 ### Cloudflare Tunnel (action manuelle, côté dashboard) — fait

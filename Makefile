@@ -2,7 +2,7 @@
 # Les cibles `fetch-*`, `build`, `tiles`, `api` appellent le package Python à créer (voir docs/architecture.md).
 # Ce fichier est un CONTRAT d'interface : Claude Code implémente les modules derrière.
 
-.PHONY: setup lint test fetch-all fetch-v0 build build-swi tiles api clean \
+.PHONY: setup lint test fetch-all fetch-v0 build build-swi build-piezo tiles api clean \
         fetch-communes fetch-rga fetch-bascule fetch-insee \
         fetch-swi fetch-piezo fetch-gaspar fetch-dvf fetch-fideli
 
@@ -35,6 +35,9 @@ build:        ## transformations DuckDB complètes + mart commune_pression
 
 build-swi:    ## refresh SWI léger (mensuel) : dynamique uniquement (réutilise staging v0)
 	uv run python -m solveille.transform.build swi
+
+build-piezo:  ## refresh IPS léger (quotidien) : piézo + mart (réutilise staging v0/SWI)
+	uv run python -m solveille.transform.build piezo
 
 tiles:        ## génère les PMTiles (tippecanoe)
 	uv run python -m solveille.transform.tiles
