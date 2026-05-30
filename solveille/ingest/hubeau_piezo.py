@@ -41,6 +41,11 @@ SOURCE = "hubeau_piezo"
 PAGE_SIZE = 20000
 #: Historique minimal exigé (méthode BRGM ; ≥ 15 ans acceptable, ≥ 30 idéal).
 MIN_YEARS = 15
+#: Profondeur **maximale** d'historique téléchargé par station (depuis `date_fin`). Borne le
+#: volume — une station mesurée depuis 1899 ou en pas sous-horaire sur des décennies déclenche
+#: sinon un fenêtrage récursif très lourd (≫ 20000 pts) et un fetch national interminable. 35 ans
+#: garde la fenêtre BRGM ≥ 30 ans. Ancré sur `date_fin` (idempotent, indépendant de la date de run).
+MAX_HISTORY_YEARS = 35
 #: Pause minimale entre requêtes station (politesse réseau : ≤ ~2 req/s).
 MIN_PAUSE_S = 0.5
 #: Départements métropole (repli si `SOLVEILLE_DEPARTEMENTS` vide → run national, M3).
@@ -151,6 +156,17 @@ def _lines(code_bss: str, rows: list[dict[str, Any]]) -> str:
     return "".join(json.dumps({"code_bss": code_bss, **r}, ensure_ascii=False) + "\n" for r in rows)
 
 
+def _history_start(d_deb: date, d_fin: date) -> date:
+    """Début de fetch borné à `MAX_HISTORY_YEARS` avant `date_fin` (volume/politesse).
+
+    `max(date_debut, date_fin − 35 ans)` : ne tronque que les stations à très long historique
+    (1899→…) ; garde toute la chronique des stations plus courtes. Ancré sur `date_fin` ⇒
+    idempotent (indépendant de la date d'exécution).
+    """
+    floor = d_fin - timedelta(days=round(MAX_HISTORY_YEARS * 365.25))
+    return max(d_deb, floor)
+
+
 def fetch_chronique(
     st: dict[str, Any], *, client: httpx.Client, root: Path
 ) -> tuple[Path, int, str]:
@@ -162,8 +178,8 @@ def fetch_chronique(
     quand une station gagne un point). Renvoie (chemin, n_mesures, statut).
     """
     code_bss = st["code_bss"]
-    d_deb = date.fromisoformat(st["date_debut_mesure"][:10])
     d_fin = date.fromisoformat(st["date_fin_mesure"][:10])
+    d_deb = _history_start(date.fromisoformat(st["date_debut_mesure"][:10]), d_fin)
     cdir = root / "chroniques"
     cdir.mkdir(parents=True, exist_ok=True)
     dest = cdir / f"{_safe(code_bss)}.jsonl"
