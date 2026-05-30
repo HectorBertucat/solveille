@@ -97,9 +97,7 @@ def _keep_station(st: dict[str, Any]) -> bool:
     return fin >= SERVED_FROM  # sinon aucune contribution à la fenêtre 2017→
 
 
-def fetch_stations(
-    dept: str, *, client: httpx.Client, root: Path
-) -> list[dict[str, Any]]:
+def fetch_stations(dept: str, *, client: httpx.Client, root: Path) -> list[dict[str, Any]]:
     """Liste les stations d'un département (1 requête), écrit le brut, renvoie celles à garder."""
     payload = http.get_json(
         _endpoint("stations"),

@@ -40,9 +40,7 @@ def test_build_piezo_stations_reprojects_to_l93(tmp_path: Path) -> None:
     )
     con = duckdb_io.connect()
     try:
-        out = piezo.build_piezo_stations(
-            con, raw_dir=sdir, out=tmp_path / "piezo_stations.parquet"
-        )
+        out = piezo.build_piezo_stations(con, raw_dir=sdir, out=tmp_path / "piezo_stations.parquet")
         row = con.execute(
             f"""SELECT code_bss, code_commune_insee, round(span_annees, 2),
                        round(ST_X(ST_GeomFromWKB(geom_wkb))), round(ST_Y(ST_GeomFromWKB(geom_wkb)))
