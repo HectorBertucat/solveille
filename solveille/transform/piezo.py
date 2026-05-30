@@ -48,17 +48,30 @@ COPY (
 ) TO '{out}' (FORMAT PARQUET);
 """
 
-# Médiane mensuelle du NGF (robuste aux pics) par (code_bss, mois). 1er du mois en DATE.
-_MENSUEL_SQL = """
-COPY (
-  SELECT code_bss::VARCHAR                                              AS code_bss,
-         CAST(date_trunc('month', CAST(date_mesure AS DATE)) AS DATE)   AS date_mois,
-         median(TRY_CAST(niveau_nappe_eau AS DOUBLE))                   AS ngf,
-         count(*)                                                       AS n_obs
-  FROM read_json('{glob}', format = 'newline_delimited', union_by_name = true)
-  WHERE niveau_nappe_eau IS NOT NULL AND date_mesure IS NOT NULL
-  GROUP BY code_bss, date_trunc('month', CAST(date_mesure AS DATE))
-) TO '{out}' (FORMAT PARQUET);
+# Borne mémoire des builds piézo nationaux (VM 8 Go **partagée**) : DuckDB spille au disque
+# plutôt que de se faire tuer par l'OOM killer. Le national = 18 M+ mesures.
+PIEZO_MEMORY_LIMIT = "4GB"
+# Lecture des chroniques **par lots** de fichiers (anti-OOM) : `read_json` sur 2809 fichiers
+# d'un coup fait exploser la RAM. 1 station = 1 fichier ⇒ chaque (code_bss, mois) est complet
+# dans son lot ⇒ la médiane par lot est exacte (pas de fusion inter-lots nécessaire).
+MENSUEL_BATCH = 200
+
+_MENSUEL_DDL = """
+CREATE OR REPLACE TEMP TABLE _piezo_mensuel (
+  code_bss VARCHAR, date_mois DATE, ngf DOUBLE, n_obs BIGINT
+)
+"""
+
+# Médiane mensuelle du NGF (robuste aux pics) par (code_bss, mois), pour UN lot de fichiers.
+_MENSUEL_INSERT_SQL = """
+INSERT INTO _piezo_mensuel
+SELECT code_bss::VARCHAR,
+       CAST(date_trunc('month', CAST(date_mesure AS DATE)) AS DATE),
+       median(TRY_CAST(niveau_nappe_eau AS DOUBLE)),
+       count(*)
+FROM read_json([{files}], format = 'newline_delimited', union_by_name = true)
+WHERE niveau_nappe_eau IS NOT NULL AND date_mesure IS NOT NULL
+GROUP BY code_bss, date_trunc('month', CAST(date_mesure AS DATE))
 """
 
 
@@ -81,7 +94,7 @@ def build_piezo_stations(
     xmin, ymin, xmax, ymax = METROPOLE_L93_BBOX
 
     own = con is None
-    con = con or duckdb_io.connect()
+    con = con or duckdb_io.connect(memory_limit=PIEZO_MEMORY_LIMIT)
     try:
         con.execute(_STATIONS_SQL.format(glob=f"{raw_dir}/*.jsonl", out=out))
         n = duckdb_io.scalar(con, f"SELECT count(*) FROM read_parquet('{out}')")
@@ -120,13 +133,18 @@ def build_piezo_mensuel(
     raw_dir = raw_dir or (s.source_raw_dir(SOURCE) / "chroniques")
     out = out or (s.staging_dir / "piezo_mensuel.parquet")
     out.parent.mkdir(parents=True, exist_ok=True)
-    if not sorted(raw_dir.glob("*.jsonl")):
+    files = sorted(raw_dir.glob("*.jsonl"))
+    if not files:
         raise FileNotFoundError("Chroniques piézo absentes — lance d'abord `make fetch-piezo`.")
 
     own = con is None
-    con = con or duckdb_io.connect()
+    con = con or duckdb_io.connect(memory_limit=PIEZO_MEMORY_LIMIT)
     try:
-        con.execute(_MENSUEL_SQL.format(glob=f"{raw_dir}/*.jsonl", out=out))
+        con.execute(_MENSUEL_DDL)
+        for i in range(0, len(files), MENSUEL_BATCH):  # anti-OOM : par lots de fichiers
+            flist = ", ".join(f"'{f}'" for f in files[i : i + MENSUEL_BATCH])
+            con.execute(_MENSUEL_INSERT_SQL.format(files=flist))
+        con.execute(f"COPY _piezo_mensuel TO '{out}' (FORMAT PARQUET);")
         stats = con.execute(
             f"""SELECT count(*), count(DISTINCT code_bss),
                        min(date_mois), max(date_mois)

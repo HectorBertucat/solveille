@@ -26,6 +26,7 @@ from solveille.metric.ip_rga import (
     IPS_FULL_YEARS,
     IPS_MIN_YEARS,
 )
+from solveille.transform.piezo import PIEZO_MEMORY_LIMIT
 
 log = get_logger("solveille.transform.piezo_ips")
 
@@ -116,7 +117,7 @@ def build_piezo_ips(
     out.parent.mkdir(parents=True, exist_ok=True)
 
     own = con is None
-    con = con or duckdb_io.connect()
+    con = con or duckdb_io.connect(memory_limit=PIEZO_MEMORY_LIMIT)
     try:
         con.execute(_PROBIT_MACRO_SQL)
         con.execute(
@@ -266,7 +267,7 @@ def build_commune_ips(
     out.parent.mkdir(parents=True, exist_ok=True)
 
     own = con is None
-    con = con or duckdb_io.connect()
+    con = con or duckdb_io.connect(memory_limit=PIEZO_MEMORY_LIMIT)
     try:
         con.execute(_PZ_DDL.format(conf=_CONF_EXPR, stations=stations_parquet))
         con.execute(_STATION_COMMUNE_DDL)
