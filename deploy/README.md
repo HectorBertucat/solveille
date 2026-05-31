@@ -12,6 +12,14 @@ Composants :
 - `solveille-gaspar.{service,timer}` — refresh GASPAR **hebdomadaire** (calibration `H`, v2) : `deploy/run-refresh-gaspar.sh` = `make fetch-gaspar build-gaspar tiles`, **flock partagé**. `build-gaspar` recalcule `catnat_secheresse` + `commune_h` (réutilise le substrat `z_SWI` historique `commune_swi_hist`, reconstruit seulement au 1er run) + marts. ⚠️ Le refresh piézo quotidien **ne construit pas** `commune_h` (il le **relit** s'il existe) — la calibration `H` est (re)construite par les refreshs **SWI mensuel** et **GASPAR hebdo**.
 - CI/CD GitHub Actions (`.github/workflows/ci.yml`) : lint+types+tests, puis **déploiement SSH** sur push `main`.
 
+> ⚠️ **mapshaper requis pour la qualité carto (A2, anti-slivers).** `make tiles` simplifie la
+> **topologie** des communes via `mapshaper-xl` (arcs partagés → zéro espace blanc entre communes).
+> S'il est **absent**, `build_tiles` ne casse pas mais retombe en silence sur une simplification
+> tippecanoe non-topologique (les slivers peuvent réapparaître) — le log porte `mapshaper=False`.
+> **Installer + épingler mapshaper sur la VM** (`npm i -g mapshaper@0.6.121`). Build national mesuré :
+> GeoJSON intermédiaire ~377 Mo → mapshaper **pic RSS ~1,25 Go** (OK sur 8 Go) → `.pmtiles` ~27 Mo ;
+> les GeoJSON intermédiaires sont supprimés après le build (seul le `.pmtiles` reste dans `tiles/out`).
+
 ## Bootstrap (une fois)
 
 ```bash
@@ -19,6 +27,7 @@ Composants :
 curl -LsSf https://astral.sh/uv/install.sh | sh           # uv
 ln -sf "$HOME/.local/bin/uv" /usr/local/bin/uv            # uv sur le PATH des shells non-login (CI)
 apt-get update && apt-get install -y tippecanoe           # PMTiles (dispo en 2.49 sur Ubuntu 24.04)
+apt-get install -y nodejs npm && npm i -g mapshaper@0.6.121  # simplification TOPOLOGIQUE des tuiles (A2)
 
 # Code
 git clone https://github.com/HectorBertucat/solveille.git /opt/solveille
