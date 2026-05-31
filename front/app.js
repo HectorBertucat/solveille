@@ -9,10 +9,17 @@ maplibregl.addProtocol("pmtiles", protocol.tile);
 const PMTILES_URL = "pmtiles://" + location.origin + "/tiles/communes.pmtiles";
 const SRC_LAYER = "communes";
 
-// Palette des 5 niveaux (code 1→5) ; 0/absent = gris (pas d'argile / hors couverture).
-const GREY = "#e8e8e8";
-const NIVEAU_COLORS = { 1: "#ffffb2", 2: "#fecc5c", 3: "#fd8d3c", 4: "#f03b20", 5: "#bd0026" };
+// Palette des 5 niveaux : **lue depuis les tokens CSS** (--risk-0..5) → source unique UI+carte (B3).
+function cssVar(name) { return getComputedStyle(document.documentElement).getPropertyValue(name).trim(); }
+let GREY = "#e7e3dc"; // = --risk-0 (neutre « papier ») ; rafraîchi par readPalette()
+const NIVEAU_COLORS = { 1: "#fde8c4", 2: "#f9c178", 3: "#f08c3a", 4: "#d6562a", 5: "#9b2226" };
+function readPalette() {
+  GREY = cssVar("--risk-0") || GREY;
+  for (let i = 1; i <= 5; i++) NIVEAU_COLORS[i] = cssVar("--risk-" + i) || NIVEAU_COLORS[i];
+}
 const NIVEAU_LABELS = { 1: "Très faible", 2: "Faible", 3: "Modérée", 4: "Élevée", 5: "Très élevée" };
+// Texte clair sur fond foncé (niveaux 3-5), sinon encre (0-2).
+function pillInk(code) { return code >= 3 ? "#fff" : "#241c14"; }
 
 // Classes BRGM de l'IPS (niveau de nappe, 0 sec → 6 humide) — palette divergente brun↔teal.
 const IPS_CLASS_LABELS = ["Très bas", "Bas", "Modérément bas", "Autour de la moyenne",
@@ -45,6 +52,16 @@ function colorExpr(attrKey) {
   ];
 }
 
+// Thème (clair/sombre) appliqué AVANT la carte pour que readPalette() lise les bons tokens.
+const savedTheme = (() => { try { return localStorage.getItem("solveille_theme"); } catch (_) { return null; } })();
+if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
+readPalette();
+const themeNow = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
+const BASEMAP = {
+  light: "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
+  dark: "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
+};
+
 const map = new maplibregl.Map({
   container: "map",
   style: {
@@ -53,14 +70,14 @@ const map = new maplibregl.Map({
     sources: {
       carto: {
         type: "raster",
-        tiles: ["https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png"],
+        tiles: [BASEMAP[themeNow()]],
         tileSize: 256,
         attribution: "© OpenStreetMap, © CARTO — RGA: Géorisques/BRGM · SWI: Météo-France · Nappes: Hub'eau/ADES-BRGM · DVF: DGFiP/Etalab · IGN · Insee · SDES",
       },
       communes: { type: "vector", url: PMTILES_URL },
     },
     layers: [
-      { id: "bg", type: "background", paint: { "background-color": "#f2f3f5" } },
+      { id: "bg", type: "background", paint: { "background-color": cssVar("--bg") } },
       { id: "carto", type: "raster", source: "carto", paint: { "raster-opacity": 0.55 } },
       {
         id: "communes-fill", type: "fill", source: "communes", "source-layer": SRC_LAYER,
@@ -90,6 +107,7 @@ let MONTHS = []; // [{key:'202512', iso:'2025-12', y, m}]
 let EXPRS = []; // expressions de couleur MapLibre pré-compilées (1 par mois) — voir A3
 let META = null; // /meta (last_updated_* pour l'overlay « À propos »)
 let CP_DATE = null; // last_updated_cp (depuis communes-index.json)
+let HIST = {}; // histogramme mensuel des niveaux {AAAAMM:[n1..n5]} → compteur de légende
 let idx = 0; // index du mois actif
 let openInsee = null; // commune dont la fiche est ouverte
 let lastSerie = null; // série de la commune ouverte (cache pour le sparkline)
@@ -112,6 +130,22 @@ function monthsBetween(minIso, maxIso) {
 const slider = document.getElementById("month");
 const monthLabel = document.getElementById("monthLabel");
 const legendMonth = document.getElementById("legendMonth");
+const legendCount = document.getElementById("legendCount");
+
+// Compteur de légende : « ≈ N communes en pression élevée+ ce mois » (histogramme mensuel).
+function updateLegendCount() {
+  if (!legendCount) return;
+  const mo = MONTHS[idx];
+  const h = mo && HIST[mo.key];
+  legendCount.replaceChildren();
+  if (!h) return;
+  const eleve = (h[3] || 0) + (h[4] || 0);
+  legendCount.append(
+    document.createTextNode("≈ "),
+    elt("b", { text: eleve.toLocaleString("fr-FR") }),
+    document.createTextNode(" communes en pression élevée+ ce mois"),
+  );
+}
 
 // Recolore la carte + met à jour les libellés pour le mois `i` (expression pré-compilée).
 function paintMonth(i) {
@@ -123,6 +157,7 @@ function paintMonth(i) {
   const lbl = monthLabelOf(mo);
   monthLabel.textContent = lbl;
   legendMonth.textContent = lbl;
+  updateLegendCount();
   slider.value = String(idx);
 }
 
@@ -148,10 +183,30 @@ function applyMonth(i, { refreshPanel = false } = {}) {
   if (refreshPanel && openInsee) renderFiche();
 }
 
-slider.addEventListener("input", () => scheduleApply(+slider.value)); // throttlé rAF (1 recolor/frame)
+slider.addEventListener("input", () => { stopPlay(); scheduleApply(+slider.value); }); // throttlé rAF
 slider.addEventListener("change", () => applyMonth(+slider.value, { refreshPanel: true }));
-document.getElementById("prevM").onclick = () => applyMonth(idx - 1, { refreshPanel: true });
-document.getElementById("nextM").onclick = () => applyMonth(idx + 1, { refreshPanel: true });
+document.getElementById("prevM").onclick = () => { stopPlay(); applyMonth(idx - 1, { refreshPanel: true }); };
+document.getElementById("nextM").onclick = () => { stopPlay(); applyMonth(idx + 1, { refreshPanel: true }); };
+
+// --- Animation « play » (B1) : boucle les mois (la transition fill-color lisse le saut). ---
+let playTimer = null;
+function stopPlay() {
+  if (!playTimer) return;
+  clearInterval(playTimer);
+  playTimer = null;
+  const b = document.getElementById("playM");
+  if (b) b.textContent = "▶";
+}
+document.getElementById("playM").addEventListener("click", () => {
+  if (playTimer) { stopPlay(); return; }
+  if (!MONTHS.length) return;
+  document.getElementById("playM").textContent = "⏸";
+  if (idx >= MONTHS.length - 1) paintMonth(0); // repart du début si on est à la fin
+  playTimer = setInterval(() => {
+    if (idx >= MONTHS.length - 1) { stopPlay(); applyMonth(idx, { refreshPanel: true }); return; }
+    paintMonth(idx + 1);
+  }, 220);
+});
 
 async function initTime() {
   try {
@@ -213,7 +268,7 @@ function sparkline(serie, activeIso) {
   const y = (s) => H - pad - (s / 100) * (H - 2 * pad);
   const line = document.createElementNS(SVGNS, "polyline");
   line.setAttribute("fill", "none");
-  line.setAttribute("stroke", "#bd0026");
+  line.setAttribute("stroke", cssVar("--risk-5"));
   line.setAttribute("stroke-width", "1.5");
   line.setAttribute("points", serie.map((p, i) => `${x(i)},${y(p.ip_rga_score || 0)}`).join(" "));
   svg.appendChild(line);
@@ -223,7 +278,7 @@ function sparkline(serie, activeIso) {
     dot.setAttribute("cx", String(x(ai)));
     dot.setAttribute("cy", String(y(serie[ai].ip_rga_score || 0)));
     dot.setAttribute("r", "3");
-    dot.setAttribute("fill", "#1a1a2e");
+    dot.setAttribute("fill", cssVar("--ink"));
     svg.appendChild(dot);
   }
   wrap.appendChild(svg);
@@ -276,15 +331,24 @@ async function renderFiche() {
       body.append(elt("span", { class: "badge bascule", text: "Reclassée 2026" }));
     }
 
-    // Pastille de pression du mois sélectionné
+    // Hero-number : gros score de pression (mono) + pastille du niveau + mois.
     const ni = niveauInfo(f.ip_rga_niveau_code);
-    const head = elt("div");
-    const pill = elt("span", { class: "e-pill", text: "Pression " + (f.ip_rga_niveau || ni.label) });
+    const hero = elt("div", { class: "hero" });
+    const score = elt("div", { class: "score" });
+    if (f.ip_rga_score == null) {
+      score.textContent = "—";
+    } else {
+      score.textContent = String(f.ip_rga_score);
+      score.append(elt("small", { text: " /100" }));
+    }
+    const heroMeta = elt("div", { class: "meta" });
+    const pill = elt("span", { class: "e-pill", text: f.ip_rga_niveau || ni.label });
     pill.style.background = ni.color;
-    if (ni.color === "#ffffb2" || ni.color === GREY) pill.style.color = "#1a1a2e";
-    head.append(pill);
-    if (mo) head.append(elt("span", { class: "dept", text: "  " + monthLabelOf(mo) }));
-    body.append(head);
+    pill.style.color = pillInk(f.ip_rga_niveau_code || 0);
+    heroMeta.append(pill);
+    if (mo) heroMeta.append(elt("span", { class: "mois", text: monthLabelOf(mo) }));
+    hero.append(score, heroMeta);
+    body.append(hero);
 
     // Sparkline (série en cache)
     if (!lastSerie) {
@@ -295,7 +359,6 @@ async function renderFiche() {
     if (lastSerie && lastSerie.length > 1) body.append(sparkline(lastSerie, mo ? mo.iso : ""));
 
     body.append(
-      kv("Score de pression", f.ip_rga_score == null ? "—" : f.ip_rga_score + " / 100"),
       kv("Sécheresse du moment (T)", f.T == null ? "—" : Math.round(f.T * 100) + " %"),
       kv("Exposition argile (E)", f.E == null ? "—" : f.E.toFixed(2)),
       kv("Surface en aléa moyen+fort", pct(f.part_alea_moyen_fort)),
@@ -411,7 +474,9 @@ async function initSearch() {
   let indexData;
   try { indexData = await (await fetch("communes-index.json")).json(); } catch (_) { return; }
   CP_DATE = indexData.last_updated_cp;
+  HIST = indexData.hist || {};
   fillIntroDates();
+  updateLegendCount();
   const d = indexData.data;
   DOCS = d.insee.map((insee, i) => ({
     id: insee, insee, nom: d.nom[i], dept: d.dept[i], bbox: d.bbox[i],
@@ -581,3 +646,29 @@ introEl.addEventListener("keydown", (e) => {
 });
 // 1er chargement : afficher l'intro une fois (puis mémorisée).
 try { if (!localStorage.getItem("solveille_intro_seen")) openIntro(); } catch (_) { openIntro(); }
+
+// --- B3 : thème clair/sombre (tokens) + légende interactive ---
+function applyTheme(theme) {
+  const dark = theme === "dark";
+  document.documentElement.dataset.theme = dark ? "dark" : "";
+  try { localStorage.setItem("solveille_theme", dark ? "dark" : "light"); } catch (_) { /* indispo */ }
+  readPalette(); // GREY (--risk-0) change avec le thème ; la rampe data 1→5 est constante
+  if (MONTHS.length) EXPRS = MONTHS.map((m) => colorExpr("n_" + m.key));
+  if (map.getSource("carto")) map.getSource("carto").setTiles([BASEMAP[dark ? "dark" : "light"]]);
+  if (map.getLayer("bg")) map.setPaintProperty("bg", "background-color", cssVar("--bg"));
+  if (MONTHS.length) paintMonth(idx);
+}
+document.getElementById("themeBtn").addEventListener("click", () => {
+  applyTheme(themeNow() === "dark" ? "light" : "dark");
+});
+
+// Légende : survol d'une classe → met en avant (atténue les autres segments).
+const gradEl = document.getElementById("grad");
+if (gradEl) {
+  const segs = [...gradEl.querySelectorAll("span")];
+  gradEl.addEventListener("mouseover", (e) => {
+    const niv = e.target.dataset ? e.target.dataset.niv : null;
+    segs.forEach((s) => s.classList.toggle("dim", !!niv && s.dataset.niv !== niv));
+  });
+  gradEl.addEventListener("mouseleave", () => segs.forEach((s) => s.classList.remove("dim")));
+}

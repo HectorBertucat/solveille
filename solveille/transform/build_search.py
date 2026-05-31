@@ -116,6 +116,17 @@ def build_communes_index(
             ORDER BY g.code_insee
             """
         ).fetchall()
+        # Histogramme mensuel des niveaux (compteur de légende « N communes en pression X »).
+        hist_rows = (
+            con.execute(
+                f"""SELECT strftime(date_mois, '%Y%m') AS k, ip_rga_niveau_code AS niv,
+                           count(*) AS n
+                    FROM read_parquet('{mensuel_parquet}')
+                    WHERE ip_rga_niveau_code >= 1 GROUP BY k, niv"""
+            ).fetchall()
+            if has_niv
+            else []
+        )
     finally:
         if own:
             con.close()
@@ -130,6 +141,11 @@ def build_communes_index(
         cp.append(list(r[7]) if r[7] else [])
         niveau.append(int(r[8]) if r[8] is not None else 0)
 
+    # hist[AAAAMM] = [n1, n2, n3, n4, n5] (nb de communes par niveau ce mois-là).
+    hist: dict[str, list[int]] = {}
+    for k, niv, n in hist_rows:
+        hist.setdefault(k, [0, 0, 0, 0, 0])[int(niv) - 1] = int(n)
+
     manifest = read_manifest(s.source_raw_dir(SOURCE_CP)) or {}
     payload = {
         "last_updated_cp": manifest.get("source_version") or manifest.get("date_fetch"),
@@ -143,6 +159,7 @@ def build_communes_index(
             "cp": cp,
             "niveau": niveau,
         },
+        "hist": hist,
     }
     out.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     n_cp = sum(1 for c in cp if c)

@@ -5,116 +5,163 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <!-- Garde-fou DVF : pas d'indexation par les moteurs -->
   <meta name="robots" content="noindex, nofollow" />
+  <!-- Favicon inline (motif « fissure » ocre/brique, sur-marque) -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23d6562a'/%3E%3Cpath d='M17 5 L12 16 L17 16 L13 27' stroke='%239b2226' stroke-width='2.6' fill='none' stroke-linejoin='round' stroke-linecap='round'/%3E%3C/svg%3E" />
+  <meta name="theme-color" content="#211a12" />
   <title>Solveille — la boussole RGA</title>
   <link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" />
   <script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
   <script src="https://unpkg.com/pmtiles@3.2.1/dist/pmtiles.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/minisearch@7.1.1/dist/umd/index.min.js"></script>
   <style>
-    :root { --ink:#1a1a2e; --muted:#6b7280; }
+    /* Polices self-hostées (B3) : Inter (UI) + IBM Plex Mono (chiffres). 0€ licence, pas de CDN. */
+    @font-face { font-family:"Inter"; src:url("fonts/inter-var.woff2") format("woff2");
+                 font-weight:100 900; font-display:swap; }
+    @font-face { font-family:"IBM Plex Mono"; src:url("fonts/plexmono-400.woff2") format("woff2");
+                 font-weight:400; font-display:swap; }
+    @font-face { font-family:"IBM Plex Mono"; src:url("fonts/plexmono-600.woff2") format("woff2");
+                 font-weight:600; font-display:swap; }
+
+    /* === Tokens (source unique UI + carte). Rampe ocre→brique « argile/sécheresse ». === */
+    :root {
+      --risk-0:#e7e3dc; --risk-1:#fde8c4; --risk-2:#f9c178; --risk-3:#f08c3a; --risk-4:#d6562a; --risk-5:#9b2226;
+      --accent:#0e7c86; --accent-ink:#fff; --bascule:#6d28d9;
+      --ink:#241c14; --muted:#7c7064; --bg:#f1eee8;
+      --surface:#fffdfa; --surface-2:#f6f2ec; --border:#e7e0d6; --hairline:rgba(60,45,30,.10);
+      --header:#211a12; --header-ink:#f6efe4; --shadow:0 4px 18px rgba(50,38,24,.14);
+      --sans:"Inter",-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+      --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    }
+    [data-theme="dark"] {
+      --risk-0:#39322a;  /* neutre « papier » assombri ; la rampe data 1→5 reste identique */
+      --ink:#ece6dc; --muted:#a99e8e; --bg:#16130f;
+      --surface:#241e17; --surface-2:#2c241b; --border:#3a3025; --hairline:rgba(255,245,225,.10);
+      --shadow:0 6px 22px rgba(0,0,0,.55);
+    }
     * { box-sizing: border-box; }
-    html, body { margin:0; height:100%; font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif; color:var(--ink); }
-    #map { position:absolute; inset:64px 0 0 0; }
-    header { position:absolute; inset:0 0 auto 0; height:64px; z-index:3; background:var(--ink); color:#fff;
-             display:flex; align-items:center; gap:16px; padding:0 16px; }
+    html, body { margin:0; height:100%; font-family:var(--sans); color:var(--ink); background:var(--bg);
+                 -webkit-font-smoothing:antialiased; }
+    .mono, .num { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+    #map { position:absolute; inset:56px 0 0 0; }
+    header { position:absolute; inset:0 0 auto 0; height:56px; z-index:3; background:var(--header); color:var(--header-ink);
+             display:flex; align-items:center; gap:14px; padding:0 16px; }
     header h1 { font-size:16px; margin:0; font-weight:700; letter-spacing:.2px; white-space:nowrap; }
-    header h1 small { font-weight:400; opacity:.7; }
-    .disclaimer { font-size:12px; line-height:1.3; color:#ffd9b3; flex:1; }
+    header h1 small { font-weight:400; opacity:.65; }
+    .disclaimer { font-size:11.5px; line-height:1.3; color:rgba(246,239,228,.62); flex:1; min-width:0; }
+    .hbtn { border:1px solid rgba(246,239,228,.30); background:transparent; color:var(--header-ink);
+            border-radius:7px; padding:7px 10px; font-size:13px; font-family:var(--sans); cursor:pointer; white-space:nowrap; }
+    .hbtn:hover { background:rgba(246,239,228,.12); }
     .search { display:flex; gap:6px; align-items:flex-start; }
     .search-box { position:relative; }
-    .search input { padding:7px 10px; border:none; border-radius:6px; font-size:13px; width:240px; }
-    .search button { padding:7px 12px; border:none; border-radius:6px; background:#f59e0b; color:#1a1a2e; font-weight:600; cursor:pointer; }
+    .search input { padding:8px 11px; border:1px solid transparent; border-radius:7px; font-size:13px; width:240px;
+                    font-family:var(--sans); background:var(--surface); color:var(--ink); }
+    .search input:focus { outline:2px solid var(--accent); outline-offset:0; }
+    .search button { padding:8px 13px; border:none; border-radius:7px; background:var(--accent); color:var(--accent-ink);
+                     font-weight:600; font-family:var(--sans); cursor:pointer; }
+    .search button:hover { filter:brightness(1.08); }
     /* Autocomplete (listbox flottant) */
-    .suggest { position:absolute; right:0; min-width:300px; top:calc(100% + 4px); margin:0; padding:4px;
-               list-style:none; background:#fff; color:var(--ink); border-radius:8px;
-               box-shadow:0 6px 24px rgba(0,0,0,.22); max-height:320px; overflow:auto; z-index:10; }
+    .suggest { position:absolute; right:0; min-width:300px; top:calc(100% + 5px); margin:0; padding:4px;
+               list-style:none; background:var(--surface); color:var(--ink); border:1px solid var(--border); border-radius:10px;
+               box-shadow:var(--shadow); max-height:320px; overflow:auto; z-index:10; }
     .suggest[hidden] { display:none; }
-    .sg-item { display:flex; align-items:center; gap:8px; padding:7px 9px; border-radius:6px;
+    .sg-item { display:flex; align-items:center; gap:9px; padding:7px 9px; border-radius:7px;
                cursor:pointer; font-size:13px; white-space:nowrap; }
-    .sg-item:hover, .sg-item.active { background:#f1f1f4; }
-    .sg-sw { width:11px; height:11px; border-radius:3px; flex:none; border:1px solid rgba(0,0,0,.18); }
+    .sg-item:hover, .sg-item.active { background:var(--surface-2); }
+    .sg-sw { width:11px; height:11px; border-radius:3px; flex:none; border:1px solid var(--hairline); }
     .sg-main { font-weight:600; overflow:hidden; text-overflow:ellipsis; }
-    .sg-meta { color:var(--muted); font-variant-numeric:tabular-nums; }
-    .legend { position:absolute; left:12px; bottom:12px; z-index:3; background:#fff; padding:12px 14px;
-              border-radius:10px; box-shadow:0 2px 12px rgba(0,0,0,.18); font-size:12px; max-width:230px; }
-    .legend h3 { margin:0 0 8px; font-size:12px; text-transform:uppercase; letter-spacing:.4px; color:var(--muted); }
-    .legend .row { display:flex; align-items:center; gap:8px; margin:3px 0; }
-    .legend .sw { width:16px; height:16px; border-radius:3px; border:1px solid rgba(0,0,0,.15); }
-    .legend .bascule-sw { width:16px; height:0; border-top:3px solid #6d28d9; }
-    .legend .caveat { margin-top:8px; padding-top:8px; border-top:1px solid #eee; color:var(--muted); font-size:10.5px; line-height:1.35; }
+    .sg-meta { color:var(--muted); font-family:var(--mono); font-variant-numeric:tabular-nums; font-size:12px; }
+    /* Panneaux flottants communs (légende, timebar) */
+    .card { background:var(--surface); border:1px solid var(--border); border-radius:12px; box-shadow:var(--shadow); }
+    .legend { position:absolute; left:14px; bottom:14px; z-index:3; padding:13px 15px; font-size:12px; width:236px; }
+    .legend h3 { margin:0 0 9px; font-size:11px; text-transform:uppercase; letter-spacing:.5px; color:var(--muted); font-weight:600; }
+    .legend h3 .lm { color:var(--ink); font-family:var(--mono); }
+    /* Barre de gradient interactive (1→5) */
+    .grad { display:flex; height:14px; border-radius:4px; overflow:hidden; border:1px solid var(--hairline); }
+    .grad span { flex:1; cursor:default; transition:flex-grow .12s; }
+    .grad span.dim { opacity:.28; }
+    .grad-ax { display:flex; justify-content:space-between; font-size:10px; color:var(--muted); margin-top:3px; }
+    .legend .extra { margin-top:9px; display:flex; align-items:center; gap:7px; }
+    .legend .count { font-size:11.5px; color:var(--ink); }
+    .legend .count b { font-family:var(--mono); }
+    .legend .row { display:flex; align-items:center; gap:8px; margin:6px 0 0; font-size:11.5px; }
+    .legend .sw { width:14px; height:14px; border-radius:3px; border:1px solid var(--hairline); flex:none; }
+    .legend .bascule-sw { width:16px; height:0; border-top:3px solid var(--bascule); flex:none; }
+    .legend .caveat { margin-top:9px; padding-top:9px; border-top:1px solid var(--hairline); color:var(--muted); font-size:10.5px; line-height:1.4; }
     /* Curseur de date (bas-centre) */
-    .timebar { position:absolute; left:50%; bottom:14px; transform:translateX(-50%); z-index:3;
-               background:#fff; border-radius:10px; box-shadow:0 2px 12px rgba(0,0,0,.18);
-               padding:10px 16px; display:flex; align-items:center; gap:12px; width:min(560px,86vw); }
-    .timebar input[type=range] { flex:1; accent-color:#bd0026; }
-    .timebar .month { font-weight:700; font-size:14px; min-width:96px; text-align:right; font-variant-numeric:tabular-nums; }
-    .timebar button { border:none; background:#1a1a2e; color:#fff; width:30px; height:30px; border-radius:6px; cursor:pointer; font-size:13px; }
+    .timebar { position:absolute; left:50%; bottom:16px; transform:translateX(-50%); z-index:3;
+               padding:10px 16px; display:flex; align-items:center; gap:12px; width:min(580px,88vw); }
+    .timebar input[type=range] { flex:1; accent-color:var(--risk-5); }
+    .timebar .month { font-weight:600; font-size:14px; min-width:104px; text-align:right; font-family:var(--mono); }
+    .timebar button { border:none; background:var(--surface-2); color:var(--ink); width:30px; height:30px; border-radius:7px; cursor:pointer; font-size:14px; }
+    .timebar button:hover { background:var(--border); }
+    .timebar .play { background:var(--accent); color:var(--accent-ink); }
     /* Sparkline de pression dans la fiche */
-    .spark { margin:10px 0 2px; }
-    .spark svg { display:block; width:100%; height:46px; }
-    .spark .axis { font-size:10px; color:var(--muted); display:flex; justify-content:space-between; }
-    .panel { position:absolute; right:0; top:64px; bottom:0; width:340px; z-index:3; background:#fff;
-             box-shadow:-2px 0 16px rgba(0,0,0,.12); padding:18px 20px; overflow:auto; transform:translateX(100%);
-             transition:transform .2s ease; }
+    .spark { margin:12px 0 2px; }
+    .spark svg { display:block; width:100%; height:48px; }
+    .spark .axis { font-size:10px; color:var(--muted); display:flex; justify-content:space-between; font-family:var(--mono); }
+    .panel { position:absolute; right:0; top:56px; bottom:0; width:360px; z-index:3; background:var(--surface);
+             border-left:1px solid var(--border); box-shadow:-4px 0 22px rgba(40,30,20,.10); padding:18px 22px; overflow:auto;
+             transform:translateX(100%); transition:transform .22s ease; }
     .panel.open { transform:none; }
-    .panel .close { float:right; border:none; background:none; font-size:20px; cursor:pointer; color:var(--muted); }
-    .panel h2 { margin:0 0 2px; font-size:20px; }
-    .panel .dept { color:var(--muted); font-size:13px; margin-bottom:14px; }
-    .badge { display:inline-block; padding:3px 9px; border-radius:999px; font-size:12px; font-weight:600; }
-    .badge.bascule { background:#ede9fe; color:#6d28d9; }
-    .kv { display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-top:1px solid #f1f1f4; font-size:14px; }
+    .panel .close { float:right; border:none; background:none; font-size:22px; line-height:1; cursor:pointer; color:var(--muted); }
+    .panel h2 { margin:0 0 2px; font-size:22px; font-weight:700; letter-spacing:-.01em; }
+    .panel .dept { color:var(--muted); font-size:12.5px; margin-bottom:12px; font-family:var(--mono); }
+    .badge { display:inline-block; padding:3px 10px; border-radius:999px; font-size:11.5px; font-weight:600; }
+    .badge.bascule { background:color-mix(in srgb, var(--bascule) 16%, transparent); color:var(--bascule); }
+    /* Hero-number de la fiche (score de pression) */
+    .hero { display:flex; align-items:center; gap:14px; margin:6px 0 4px; }
+    .hero .score { font-family:var(--mono); font-weight:600; font-size:44px; line-height:1; letter-spacing:-.02em; }
+    .hero .score small { font-size:16px; color:var(--muted); font-weight:400; }
+    .hero .meta { display:flex; flex-direction:column; gap:5px; }
+    .e-pill { display:inline-block; padding:3px 10px; border-radius:7px; color:#fff; font-weight:700; font-size:12.5px; width:fit-content; }
+    .hero .mois { color:var(--muted); font-size:12px; font-family:var(--mono); }
+    .kv { display:flex; justify-content:space-between; gap:12px; padding:7px 0; border-top:1px solid var(--hairline); font-size:13.5px; }
     .kv .k { color:var(--muted); }
-    .kv .v { font-weight:600; text-align:right; }
-    .note { font-size:11px; color:var(--muted); margin-top:14px; line-height:1.4; }
-    .e-pill { display:inline-block; padding:2px 8px; border-radius:6px; color:#fff; font-weight:700; font-size:13px; }
+    .kv .v { font-weight:600; text-align:right; font-family:var(--mono); }
+    .note { font-size:11px; color:var(--muted); margin-top:14px; line-height:1.45; }
     /* Bloc corroboration nappe (IPS piézométrique, v1.1) */
-    .ips-block { margin-top:12px; padding:10px 12px; background:#f6f8fb; border-radius:8px; border:1px solid #eef1f6; }
+    .ips-block { margin-top:12px; padding:11px 13px; background:var(--surface-2); border-radius:9px; border:1px solid var(--hairline); }
     .ips-block .ips-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-    .ips-block .k { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.3px; }
-    .ips-chip { display:inline-block; padding:2px 9px; border-radius:6px; font-weight:700; font-size:12.5px; }
-    .ips-note { font-size:11px; color:var(--muted); margin-top:7px; line-height:1.4; }
+    .ips-block .k, .h-block .k { color:var(--muted); font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+    .ips-chip { display:inline-block; padding:2px 9px; border-radius:6px; font-weight:700; font-size:12px; }
+    .ips-note, .h-note { font-size:11px; color:var(--muted); margin-top:7px; line-height:1.45; }
     /* Bloc calibration historique (H — Cat-Nat sécheresse GASPAR, v2) */
-    .h-block { margin-top:12px; padding:10px 12px; background:#fbf7f4; border-radius:8px; border:1px solid #f3ece6; }
+    .h-block { margin-top:12px; padding:11px 13px; background:var(--surface-2); border-radius:9px; border:1px solid var(--hairline); }
     .h-block .h-head { display:flex; align-items:center; justify-content:space-between; gap:8px; }
-    .h-block .k { color:var(--muted); font-size:12px; text-transform:uppercase; letter-spacing:.3px; }
-    .h-chip { display:inline-block; padding:2px 9px; border-radius:6px; font-weight:700; font-size:12.5px; }
-    .h-note { font-size:11px; color:var(--muted); margin-top:7px; line-height:1.4; }
-    .h-hist { font-size:12px; color:#444; margin-top:6px; }
-    /* Bouton « À propos » (header) */
-    .about-btn { border:1px solid rgba(255,255,255,.35); background:transparent; color:#fff;
-                 border-radius:6px; padding:7px 11px; font-size:13px; cursor:pointer; white-space:nowrap; }
-    .about-btn:hover { background:rgba(255,255,255,.12); }
+    .h-chip { display:inline-block; padding:2px 9px; border-radius:6px; font-weight:700; font-size:12px; font-family:var(--mono); }
+    .h-hist { font-size:12px; color:var(--ink); opacity:.85; margin-top:6px; }
     /* Overlay d'explication (A5 — landing) */
-    .intro { position:fixed; inset:0; z-index:20; background:rgba(20,20,30,.55);
+    .intro { position:fixed; inset:0; z-index:20; background:rgba(20,15,8,.58);
              display:flex; align-items:flex-start; justify-content:center; padding:5vh 16px; overflow:auto; }
     .intro[hidden] { display:none; }
-    .intro-card { background:#fff; max-width:660px; width:100%; border-radius:14px; padding:28px 30px;
-                  box-shadow:0 20px 60px rgba(0,0,0,.35); }
-    .intro-card h2 { margin:0 0 2px; font-size:24px; }
+    .intro-card { background:var(--surface); color:var(--ink); max-width:660px; width:100%; border:1px solid var(--border);
+                  border-radius:16px; padding:30px 32px; box-shadow:0 24px 64px rgba(0,0,0,.4); }
+    .intro-card h2 { margin:0 0 2px; font-size:28px; font-weight:700; letter-spacing:-.01em; }
     .intro-card .sub { color:var(--muted); font-size:14px; margin-bottom:18px; }
-    .intro-card h3 { font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:#9b2226;
-                     margin:20px 0 6px; }
-    .intro-card p { font-size:14.5px; line-height:1.55; margin:6px 0; }
-    .intro-card ul { font-size:14px; line-height:1.5; margin:6px 0; padding-left:18px; }
+    .intro-card h3 { font-size:12px; text-transform:uppercase; letter-spacing:.6px; color:var(--accent);
+                     margin:22px 0 6px; font-weight:600; }
+    .intro-card p { font-size:14.5px; line-height:1.6; margin:6px 0; }
+    .intro-card ul { font-size:14px; line-height:1.55; margin:6px 0; padding-left:18px; }
     .intro-card li { margin:4px 0; }
-    .intro-card .warn { background:#fbf3ee; border:1px solid #f0e0d6; border-radius:8px;
-                        padding:11px 13px; font-size:13.5px; color:#5a3a2a; margin-top:14px; }
+    .intro-card .warn { background:color-mix(in srgb, var(--risk-3) 12%, var(--surface)); border:1px solid var(--hairline);
+                        border-radius:9px; padding:11px 14px; font-size:13.5px; margin-top:14px; }
     .intro-card .src { display:flex; justify-content:space-between; gap:14px; font-size:12.5px;
-                       padding:5px 0; border-top:1px solid #f1f1f4; }
-    .intro-card .src .d { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
-    .intro-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:22px; }
-    .intro-foot .go { border:none; background:#9b2226; color:#fff; font-weight:600; font-size:14px;
-                      padding:10px 20px; border-radius:8px; cursor:pointer; }
-    .intro-foot .go:hover { background:#b5292d; }
+                       padding:6px 0; border-top:1px solid var(--hairline); }
+    .intro-card .src .d { color:var(--muted); font-family:var(--mono); white-space:nowrap; }
+    .intro-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:24px; }
+    .intro-foot .go { border:none; background:var(--accent); color:var(--accent-ink); font-weight:600; font-size:14px;
+                      font-family:var(--sans); padding:11px 22px; border-radius:9px; cursor:pointer; }
+    .intro-foot .go:hover { filter:brightness(1.08); }
     .intro-foot .lic { color:var(--muted); font-size:11.5px; }
-    @media (max-width:560px) { .intro-card { padding:22px 18px; } }
+    @media (max-width:560px) { .intro-card { padding:22px 18px; } .disclaimer { display:none; } }
   </style>
 </head>
 <body>
   <header>
     <h1>Solveille <small>· la boussole RGA</small></h1>
     <div class="disclaimer">Indice territorial <b>indicatif</b> — ne prédit pas de fissures par bâtiment, n'est ni un diagnostic ni un conseil d'achat/assurance.</div>
-    <button type="button" class="about-btn" id="aboutBtn" aria-haspopup="dialog">À propos</button>
+    <button type="button" class="hbtn" id="themeBtn" aria-label="Basculer thème clair/sombre" title="Thème clair/sombre">◐</button>
+    <button type="button" class="hbtn" id="aboutBtn" aria-haspopup="dialog">À propos</button>
     <form class="search" id="search" role="search">
       <div class="search-box">
         <input id="q" placeholder="Commune, code postal ou INSEE…" autocomplete="off"
@@ -126,18 +173,23 @@
     </form>
   </header>
   <div id="map"></div>
-  <div class="legend">
-    <h3>Pression RGA — <span id="legendMonth">…</span></h3>
-    <div class="row"><span class="sw" style="background:#bd0026"></span> Très élevée</div>
-    <div class="row"><span class="sw" style="background:#f03b20"></span> Élevée</div>
-    <div class="row"><span class="sw" style="background:#fd8d3c"></span> Modérée</div>
-    <div class="row"><span class="sw" style="background:#fecc5c"></span> Faible</div>
-    <div class="row"><span class="sw" style="background:#ffffb2"></span> Très faible</div>
-    <div class="row"><span class="sw" style="background:#e8e8e8"></span> Pas d'argile / hors couverture</div>
-    <div class="row" style="margin-top:6px"><span class="bascule-sw"></span> Reclassée au 1ᵉʳ juil. 2026</div>
-    <div class="caveat">Pression = exposition argile × sécheresse du moment (SWI). Nowcast <b>lissé sur 3 mois</b>, anomalie d'humidité des sols vs normale 1960→.</div>
+  <div class="legend card">
+    <h3>Pression RGA — <span class="lm" id="legendMonth">…</span></h3>
+    <div class="grad" id="grad" role="img" aria-label="Échelle de pression, très faible à très élevée">
+      <span data-niv="1" style="background:var(--risk-1)" title="Très faible"></span>
+      <span data-niv="2" style="background:var(--risk-2)" title="Faible"></span>
+      <span data-niv="3" style="background:var(--risk-3)" title="Modérée"></span>
+      <span data-niv="4" style="background:var(--risk-4)" title="Élevée"></span>
+      <span data-niv="5" style="background:var(--risk-5)" title="Très élevée"></span>
+    </div>
+    <div class="grad-ax"><span>très faible</span><span>très élevée</span></div>
+    <div class="extra"><span class="count" id="legendCount">…</span></div>
+    <div class="row"><span class="sw" style="background:var(--risk-0)"></span> Pas d'argile / hors couverture</div>
+    <div class="row"><span class="bascule-sw"></span> Reclassée au 1ᵉʳ juil. 2026</div>
+    <div class="caveat">Pression = exposition argile × sécheresse du moment (SWI), nowcast <b>lissé sur 3 mois</b> vs normale 1960→.</div>
   </div>
-  <div class="timebar">
+  <div class="timebar card">
+    <button id="playM" class="play" aria-label="Lecture animation">▶</button>
     <button id="prevM" aria-label="Mois précédent">‹</button>
     <input type="range" id="month" min="0" max="0" value="0" step="1" aria-label="Mois" />
     <button id="nextM" aria-label="Mois suivant">›</button>
