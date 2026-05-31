@@ -69,6 +69,9 @@ COPY (
     m.prix_median_maison_eur_m2,
     m.ip_rga_score,
     m.ip_rga_niveau,
+    -- e_bin : exposition argile en 3 classes (0 = pas d'argile) → carte bivariée E×T (B1).
+    CASE WHEN m.E IS NULL OR m.E <= 0 THEN 0
+         WHEN m.E < 0.25 THEN 1 WHEN m.E < 0.60 THEN 2 ELSE 3 END AS e_bin,
     piv.* EXCLUDE (insee),
     ST_Transform(
       {geom_expr},
@@ -116,9 +119,12 @@ def build_geojson(
             raise ValueError(
                 f"Mart mensuel vide ({mensuel_parquet}) — lance `make build` avant `make tiles`."
             )
+        # Par mois : n_AAAAMM (niveau IP-RGA 0-5) + t_AAAAMM (bin tension 1-3 → bivariée E×T).
+        t_bin = "CASE WHEN T IS NULL THEN 0 WHEN T < 0.4 THEN 1 WHEN T < 0.7 THEN 2 ELSE 3 END"
         pivot_cols = ", ".join(
-            f"MAX(CASE WHEN date_mois = DATE '{d}' THEN COALESCE(ip_rga_niveau_code, 0) END) "
-            f"AS n_{k}"
+            f"MAX(CASE WHEN date_mois = DATE '{d}' "
+            f"THEN COALESCE(ip_rga_niveau_code, 0) END) AS n_{k}, "
+            f"MAX(CASE WHEN date_mois = DATE '{d}' THEN {t_bin} END) AS t_{k}"
             for d, k in months
         )
         con.execute(

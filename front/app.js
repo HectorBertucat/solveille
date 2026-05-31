@@ -31,6 +31,25 @@ function heightExpr(attrKey) {
   ];
 }
 
+// Carte BIVARIÉE Exposition × Tension (B1) : matrice 3×3 (clé = (e_bin-1)*3 + t_bin, 1→9).
+// Diverge : faible expo + sécheresse = neutralisé (teal) ; forte expo + sécheresse = danger (brique).
+const BIV = {
+  1: "#eae7e0", 2: "#cfdbd5", 3: "#a6c5bf", // e=1 (faible expo) : neutre → teal
+  4: "#e2cf9c", 5: "#d49a5b", 6: "#c46a39", // e=2 (expo moyenne)
+  7: "#cf9a2e", 8: "#bf5d28", 9: "#8c1c20", // e=3 (forte expo) : ocre → brique (danger actif)
+};
+function bivExpr(tKey) {
+  const e = ["get", "e_bin"];
+  const t = ["coalesce", ["get", tKey], 0];
+  // clé 1-9 si e>0 et t>0, sinon 0 (neutre : pas d'argile ou pas de tension mesurée).
+  const key = ["case", ["all", [">", e, 0], [">", t, 0]], ["+", ["*", ["-", e, 1], 3], t], 0];
+  return [
+    "match", key,
+    1, BIV[1], 2, BIV[2], 3, BIV[3], 4, BIV[4], 5, BIV[5], 6, BIV[6], 7, BIV[7], 8, BIV[8], 9, BIV[9],
+    GREY,
+  ];
+}
+
 // Classes BRGM de l'IPS (niveau de nappe, 0 sec → 6 humide) — palette divergente brun↔teal.
 const IPS_CLASS_LABELS = ["Très bas", "Bas", "Modérément bas", "Autour de la moyenne",
                           "Modérément haut", "Haut", "Très haut"];
@@ -125,6 +144,8 @@ map.addControl(new maplibregl.NavigationControl(), "bottom-right");
 // --- État temporel (curseur de date) ---
 let MONTHS = []; // [{key:'202512', iso:'2025-12', y, m}]
 let EXPRS = []; // expressions de couleur MapLibre pré-compilées (1 par mois) — voir A3
+let BIV_EXPRS = []; // idem pour le mode bivarié Exposition × Tension (B1)
+let mapMode = "pression"; // "pression" | "biv"
 let META = null; // /meta (last_updated_* pour l'overlay « À propos »)
 let CP_DATE = null; // last_updated_cp (depuis communes-index.json)
 let HIST = {}; // histogramme mensuel des niveaux {AAAAMM:[n1..n5]} → compteur de légende
@@ -172,11 +193,13 @@ function updateLegendCount() {
 function paintMonth(i) {
   idx = Math.max(0, Math.min(MONTHS.length - 1, i));
   const mo = MONTHS[idx];
-  const expr = EXPRS[idx] || colorExpr("n_" + mo.key);
+  const expr = mapMode === "biv"
+    ? (BIV_EXPRS[idx] || bivExpr("t_" + mo.key))
+    : (EXPRS[idx] || colorExpr("n_" + mo.key));
   if (map.getLayer("communes-fill")) map.setPaintProperty("communes-fill", "fill-color", expr);
   if (is3D && map.getLayer("communes-3d")) {
-    map.setPaintProperty("communes-3d", "fill-extrusion-color", expr);
-    map.setPaintProperty("communes-3d", "fill-extrusion-height", heightExpr("n_" + mo.key));
+    map.setPaintProperty("communes-3d", "fill-extrusion-color", expr); // couleur selon le mode
+    map.setPaintProperty("communes-3d", "fill-extrusion-height", heightExpr("n_" + mo.key)); // relief = niveau
   }
   const lbl = monthLabelOf(mo);
   monthLabel.textContent = lbl;
@@ -242,6 +265,7 @@ async function initTime() {
   } catch (_) { /* /meta indisponible : curseur masqué */ }
   if (!MONTHS.length) { document.querySelector(".timebar").style.display = "none"; return; }
   EXPRS = MONTHS.map((m) => colorExpr("n_" + m.key)); // pré-compile une fois (pas par tick)
+  BIV_EXPRS = MONTHS.map((m) => bivExpr("t_" + m.key)); // idem pour le mode bivarié
   slider.min = "0";
   slider.max = String(MONTHS.length - 1);
   applyMonth(MONTHS.length - 1); // défaut : dernier mois
@@ -677,7 +701,10 @@ function applyTheme(theme) {
   document.documentElement.dataset.theme = dark ? "dark" : "";
   try { localStorage.setItem("solveille_theme", dark ? "dark" : "light"); } catch (_) { /* indispo */ }
   readPalette(); // GREY (--risk-0) change avec le thème ; la rampe data 1→5 est constante
-  if (MONTHS.length) EXPRS = MONTHS.map((m) => colorExpr("n_" + m.key));
+  if (MONTHS.length) {
+    EXPRS = MONTHS.map((m) => colorExpr("n_" + m.key));
+    BIV_EXPRS = MONTHS.map((m) => bivExpr("t_" + m.key)); // le neutre (GREY) suit le thème
+  }
   if (map.getSource("carto")) map.getSource("carto").setTiles([BASEMAP[dark ? "dark" : "light"]]);
   if (map.getLayer("bg")) map.setPaintProperty("bg", "background-color", cssVar("--bg"));
   if (MONTHS.length) paintMonth(idx);
@@ -709,3 +736,35 @@ if (gradEl) {
   });
   gradEl.addEventListener("mouseleave", () => segs.forEach((s) => s.classList.remove("dim")));
 }
+
+// --- B1 : carte bivariée Exposition × Tension (onglets de légende + matrice 3×3). ---
+function fillBivGrid() {
+  const g = document.getElementById("bivGrid");
+  if (!g || g.childElementCount) return; // une seule fois
+  // Rangées du haut (forte expo e=3) vers le bas (e=1) ; colonnes t=1→3 (gauche→droite).
+  for (const e of [3, 2, 1]) {
+    for (const t of [1, 2, 3]) {
+      const cell = elt("span");
+      cell.style.background = BIV[(e - 1) * 3 + t];
+      cell.title = `exposition ${e}/3 · sécheresse ${t}/3`;
+      g.append(cell);
+    }
+  }
+}
+function setMode(mode) {
+  mapMode = mode === "biv" ? "biv" : "pression";
+  const biv = mapMode === "biv";
+  document.getElementById("modePression").hidden = biv;
+  document.getElementById("modeBiv").hidden = !biv;
+  document.getElementById("tabPression").classList.toggle("on", !biv);
+  document.getElementById("tabBiv").classList.toggle("on", biv);
+  document.getElementById("tabPression").setAttribute("aria-selected", String(!biv));
+  document.getElementById("tabBiv").setAttribute("aria-selected", String(biv));
+  document.getElementById("legendTitle").firstChild.textContent = biv
+    ? "Exposition × Tension — "
+    : "Pression RGA — ";
+  if (biv) fillBivGrid();
+  if (MONTHS.length) paintMonth(idx);
+}
+document.getElementById("tabPression").addEventListener("click", () => setMode("pression"));
+document.getElementById("tabBiv").addEventListener("click", () => setMode("biv"));

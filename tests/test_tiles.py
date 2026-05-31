@@ -24,10 +24,10 @@ _MART = """SELECT '31555' AS insee, 'Toulouse' AS nom, '31' AS code_dept,
   0.994 AS part_alea_moyen_fort, 21578.0 AS n_maisons_exposees,
   7.6e9 AS valeur_bati_exposee_eur, 3760.0 AS prix_median_maison_eur_m2,
   45 AS ip_rga_score, 'Élevée' AS ip_rga_niveau"""
-# Mensuel : 2 mois → 2 attributs de niveau (n_202407=3, n_202408=4).
+# Mensuel : 2 mois → niveau n_AAAAMM (3,4) + tension T → bin t_AAAAMM (T=0.5→2, T=0.8→3).
 _MENSUEL = """SELECT * FROM (VALUES
-    ('31555', DATE '2024-07-01', 3), ('31555', DATE '2024-08-01', 4)
-  ) t(insee, date_mois, ip_rga_niveau_code)"""
+    ('31555', DATE '2024-07-01', 3, 0.5), ('31555', DATE '2024-08-01', 4, 0.8)
+  ) t(insee, date_mois, ip_rga_niveau_code, T)"""
 
 
 @pytest.fixture
@@ -63,10 +63,14 @@ def test_geojson_properties_and_wgs84(geojson: Path) -> None:
 def test_geojson_temporal_niveau_attributes(geojson: Path) -> None:
     con = duckdb_io.connect()
     try:
-        row = con.execute(f"SELECT n_202407, n_202408 FROM ST_Read('{geojson}') LIMIT 1").fetchone()
+        row = con.execute(
+            "SELECT n_202407, n_202408, t_202407, t_202408, e_bin "
+            f"FROM ST_Read('{geojson}') LIMIT 1"
+        ).fetchone()
+        # niveau (3,4), bin tension (T=0.5→2, T=0.8→3), e_bin (E=0.878 ≥ 0.6 → 3).
+        assert row == (3, 4, 2, 3, 3)
     finally:
         con.close()
-    assert row == (3, 4)  # un attribut de niveau IP-RGA par mois (pivot)
 
 
 # --- Couverture complète des tuiles (A1 : plus de drop au dézoom) ---------------------------
@@ -154,7 +158,7 @@ def test_tiles_full_coverage(tmp_path: Path) -> None:
         f"100.0, 1e6, 2000.0, 30, 'Modérée')"
         for ins in insees
     )
-    mensuel_rows = ",\n".join(f"('{ins}', DATE '2024-08-01', 3)" for ins in insees)
+    mensuel_rows = ",\n".join(f"('{ins}', DATE '2024-08-01', 3, 0.5)" for ins in insees)
     with duckdb_io.connection() as con:
         con.execute(f"COPY ({_grid_communes_sql()}) TO '{commune}' (FORMAT PARQUET)")
         con.execute(
@@ -164,7 +168,8 @@ def test_tiles_full_coverage(tmp_path: Path) -> None:
                 ip_rga_score, ip_rga_niveau)) TO '{mart}' (FORMAT PARQUET)"""
         )
         con.execute(
-            f"""COPY (SELECT * FROM (VALUES {mensuel_rows}) t(insee, date_mois, ip_rga_niveau_code))
+            f"""COPY (SELECT * FROM (VALUES {mensuel_rows})
+                t(insee, date_mois, ip_rga_niveau_code, T))
                 TO '{mensuel}' (FORMAT PARQUET)"""
         )
     pmtiles = build_tiles(
