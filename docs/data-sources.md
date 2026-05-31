@@ -89,6 +89,23 @@ Règles communes : reprojeter en **EPSG:2154** dès l'ingestion ; écrire le **b
 ## 9. INSEE population (option, v2) — pondération
 - **Quoi** : population communale / carroyée 200 m, structure d'âge. Pour pondérer l'enjeu par population exposée (raffinement).
 
+## 10. Codes postaux (La Poste) — recherche commune (v3, A4)
+*Vérifié live (mai 2026). **Licence Ouverte 2.0** — La Poste, « Base officielle des codes postaux ».*
+- **Acquisition** : CSV unique (~1,5 Mo) résolu via l'API data.gouv (jeu `base-officielle-des-codes-postaux`,
+  ressource `format=csv` → redirecteur stable `/api/1/datasets/r/008a2dda-…`, 302 → DataNOVA La Poste).
+  GET conditionnel (idempotent). Connecteur `ingest/codes_postaux.py` ; cadence **semestrielle** (manuel).
+  `last_updated_cp` = `last_modified` de la ressource (exposé dans `front/communes-index.json`).
+- **Schéma** (`;`, **Latin-1**, en-tête **préfixée d'un `#`**) :
+  `#Code_commune_INSEE;Nom_de_la_commune;Code_postal;Libellé_d_acheminement;Ligne_5`. 1 ligne =
+  (INSEE × CP × lieu-dit). Clé = `Code_commune_INSEE` (**texte** : zéros, Corse 2A/2B).
+- **Usage** : pas dans le mart — alimente l'**index de recherche** statique (`transform/build_search.py`
+  → `front/communes-index.json`, colonnaire : nom COG accentué, dept, bbox WGS84, `cp[]`, niveau du
+  dernier mois). Recherche front MiniSearch (fuzzy/accents/CP/INSEE).
+- **Pièges** : Latin-1 (pas UTF-8) → `read_csv(..., encoding='latin-1', comment='', names=[…])` ; dédup
+  `(INSEE, CP)` (le `Ligne_5` multiplie les lignes) ; **PLM** : la base n'a que les **arrondissements**
+  (75101-75120 / 69381-69389 / 13201-13216), pas le code COG commune (75056/69123/13055) → **rollup**
+  arrondissement → commune parent dans `build_search` (sinon Paris/Lyon/Marseille seraient sans CP).
+
 ---
 
 ### Cadences d'ingestion (scheduler)
@@ -97,6 +114,7 @@ Règles communes : reprojeter en **EPSG:2154** dès l'ingestion ; écrire le **b
 | Hub'eau `chroniques_tr` | quotidien |
 | SWI CatNat | mensuel |
 | GASPAR | hebdomadaire (ou à l'événement) |
+| Codes postaux (La Poste) | semestriel (manuel) |
 | DVF | semestriel (avril / octobre) |
 | RGA 2026 / Communes basculées | à l'événement (maj zonage) |
 | ADMIN EXPRESS / Fideli / INSEE | annuel |

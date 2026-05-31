@@ -379,34 +379,143 @@ map.on("click", "communes-fill", (e) => { if (e.features[0]) openPanel(e.feature
 map.on("mouseenter", "communes-fill", () => { map.getCanvas().style.cursor = "pointer"; });
 map.on("mouseleave", "communes-fill", () => { map.getCanvas().style.cursor = ""; });
 
-// --- Recherche (code INSEE ou nom) ---
-function bboxOf(geom) {
-  let xmin = 180, ymin = 90, xmax = -180, ymax = -90;
-  const walk = (c) => {
-    if (typeof c[0] === "number") {
-      xmin = Math.min(xmin, c[0]); xmax = Math.max(xmax, c[0]);
-      ymin = Math.min(ymin, c[1]); ymax = Math.max(ymax, c[1]);
-    } else c.forEach(walk);
-  };
-  walk(geom.coordinates);
-  return [[xmin, ymin], [xmax, ymax]];
+// --- Recherche commune : index statique + MiniSearch (fuzzy, accents, CP, INSEE, autocomplete) ---
+// Remplace l'ancien `querySourceFeatures` (ne voyait que les communes rendues + match exact).
+
+// Repli d'accents + normalisation (st→saint) pour une recherche tolérante aux variantes.
+function fold(s) {
+  return (s || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
+    .replace(/['’]/g, " ").replace(/-/g, " ")
+    .replace(/\bst\b/g, "saint").replace(/\bste\b/g, "sainte")
+    .replace(/\s+/g, " ").trim();
 }
+
+const qInput = document.getElementById("q");
+const suggestBox = document.getElementById("suggest");
+let SEARCH = null;          // instance MiniSearch (null si CDN indispo)
+let DOCS = [];              // documents {insee,nom,dept,bbox,cp,niveau}
+const inseeMap = new Map(); // INSEE → doc (lookup exact)
+const cpMap = new Map();    // code postal → [docs] (lookup exact)
+let suggestions = [];       // suggestions affichées
+let activeIdx = -1;         // option survolée au clavier
+
+async function initSearch() {
+  if (typeof MiniSearch === "undefined") return; // CDN indispo → recherche désactivée proprement
+  let idx;
+  try { idx = await (await fetch("communes-index.json")).json(); } catch (_) { return; }
+  const d = idx.data;
+  DOCS = d.insee.map((insee, i) => ({
+    id: insee, insee, nom: d.nom[i], dept: d.dept[i], bbox: d.bbox[i],
+    cp: d.cp[i] || [], niveau: d.niveau ? d.niveau[i] : 0,
+  }));
+  for (const doc of DOCS) {
+    inseeMap.set(doc.insee, doc);
+    for (const c of doc.cp) { if (!cpMap.has(c)) cpMap.set(c, []); cpMap.get(c).push(doc); }
+  }
+  SEARCH = new MiniSearch({
+    fields: ["nom", "cp"],
+    storeFields: ["insee"],
+    extractField: (doc, f) => (f === "cp" ? (doc.cp || []).join(" ") : doc[f]),
+    processTerm: (t) => fold(t) || null,
+    searchOptions: { fuzzy: 0.2, prefix: true, boost: { nom: 3 } },
+  });
+  SEARCH.addAll(DOCS);
+}
+initSearch();
+
+// Renvoie jusqu'à 8 communes : raccourcis exacts (INSEE puis CP) AVANT le fuzzy, puis MiniSearch.
+function queryCommunes(q) {
+  const out = [];
+  const seen = new Set();
+  const push = (doc) => { if (doc && !seen.has(doc.insee)) { seen.add(doc.insee); out.push(doc); } };
+  const raw = q.trim();
+  if (/^\d[\dab]\d{3}$/i.test(raw)) push(inseeMap.get(raw.toUpperCase())); // INSEE (Corse 2A/2B)
+  if (/^\d{5}$/.test(raw)) for (const d of (cpMap.get(raw) || [])) push(d); // code postal exact
+  // Saisie numérique (CP) : préfixe sans fuzzy (sinon "31000" ramène 21000/32000…).
+  const opts = /^\d+$/.test(raw) ? { fuzzy: false, prefix: true } : undefined;
+  if (SEARCH) for (const r of SEARCH.search(raw, opts)) push(inseeMap.get(r.insee));
+  if (out.length < 8 && /^\d{2,4}$/.test(raw)) { // préfixe CP partiel (ex. "3100")
+    for (const [cp, docs] of cpMap) if (cp.startsWith(raw)) for (const d of docs) push(d);
+  }
+  return out.slice(0, 8);
+}
+
+// CP à afficher dans la suggestion : celui qui matche la saisie si numérique, sinon le 1er.
+function shownCp(doc, q) {
+  if (/^\d{2,5}$/.test(q)) { const m = doc.cp.find((c) => c.startsWith(q)); if (m) return m; }
+  return doc.cp[0];
+}
+
+function closeSuggest() {
+  suggestBox.hidden = true;
+  suggestBox.replaceChildren();
+  suggestions = []; activeIdx = -1;
+  qInput.setAttribute("aria-expanded", "false");
+  qInput.removeAttribute("aria-activedescendant");
+}
+
+function renderSuggestions(list, q) {
+  suggestions = list; activeIdx = -1;
+  suggestBox.replaceChildren();
+  if (!list.length) { closeSuggest(); return; }
+  list.forEach((doc, i) => {
+    const li = elt("li", { class: "sg-item", id: "sg-" + i });
+    li.setAttribute("role", "option");
+    const sw = elt("span", { class: "sg-sw" });
+    sw.style.background = NIVEAU_COLORS[doc.niveau] || GREY; // pastille du niveau (dernier mois)
+    li.append(sw, elt("span", { class: "sg-main", text: doc.nom }));
+    const meta = " · " + doc.dept + (doc.cp.length ? " · " + shownCp(doc, q) : "");
+    li.append(elt("span", { class: "sg-meta", text: meta }));
+    li.addEventListener("mousedown", (e) => { e.preventDefault(); select(doc); }); // avant blur
+    suggestBox.append(li);
+  });
+  suggestBox.hidden = false;
+  qInput.setAttribute("aria-expanded", "true");
+}
+
+function select(doc) {
+  if (!doc) return;
+  qInput.value = doc.nom;
+  closeSuggest();
+  const b = doc.bbox;
+  map.fitBounds([[b[0], b[1]], [b[2], b[3]]], { padding: 60, maxZoom: 12 });
+  openPanel({ insee: doc.insee, nom: doc.nom, code_dept: doc.dept });
+}
+
+function moveActive(delta) {
+  const items = suggestBox.querySelectorAll(".sg-item");
+  if (!items.length) return;
+  if (activeIdx >= 0) items[activeIdx].classList.remove("active");
+  activeIdx = (activeIdx + delta + items.length) % items.length;
+  const el = items[activeIdx];
+  el.classList.add("active");
+  qInput.setAttribute("aria-activedescendant", el.id);
+  el.scrollIntoView({ block: "nearest" });
+}
+
+let searchDebounce;
+qInput.addEventListener("input", () => {
+  clearTimeout(searchDebounce);
+  const q = qInput.value.trim();
+  if (q.length < 2) { closeSuggest(); return; }
+  searchDebounce = setTimeout(() => renderSuggestions(queryCommunes(q), q), 120);
+});
+
+qInput.addEventListener("keydown", (e) => {
+  if (suggestBox.hidden) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); moveActive(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); moveActive(-1); }
+  else if (e.key === "Enter" && activeIdx >= 0) { e.preventDefault(); select(suggestions[activeIdx]); }
+  else if (e.key === "Escape") { closeSuggest(); }
+});
 
 document.getElementById("search").addEventListener("submit", (ev) => {
   ev.preventDefault();
-  const q = document.getElementById("q").value.trim();
+  const q = qInput.value.trim();
   if (!q) return;
-  const isInsee = /^\d[\dAB]\d{3}$/i.test(q);
-  const feats = map.querySourceFeatures("communes", { sourceLayer: SRC_LAYER }).filter((f) => {
-    const p = f.properties;
-    return isInsee ? p.insee === q.toUpperCase() : (p.nom || "").toLowerCase() === q.toLowerCase();
-  });
-  if (feats.length) {
-    map.fitBounds(bboxOf(feats[0].geometry), { padding: 80, maxZoom: 11 });
-    openPanel(feats[0].properties);
-  } else if (isInsee) {
-    openPanel({ insee: q.toUpperCase() });
-  } else {
-    alert("Commune non trouvée à ce zoom — dézoome sur la métropole et réessaie, ou saisis le code INSEE.");
-  }
+  const list = suggestions.length ? suggestions : queryCommunes(q);
+  if (list.length) select(activeIdx >= 0 ? suggestions[activeIdx] : list[0]);
+  else if (/^\d[\dab]\d{3}$/i.test(q)) openPanel({ insee: q.toUpperCase() }); // INSEE hors index
 });
+
+document.addEventListener("click", (e) => { if (!e.target.closest(".search")) closeSuggest(); });

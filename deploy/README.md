@@ -36,7 +36,10 @@ cd /opt/solveille && uv sync --locked
 # Données : seed poli (pas de re-fetch national RGA/DVF — on rsync les staging dérivés
 # depuis une machine qui les a déjà), puis SWI + mart + tuiles :
 #   (depuis le poste local)  rsync -az data/staging/ root@<vm>:/opt/solveille/data/staging/
-cd /opt/solveille && make fetch-swi && make build-swi && make tiles
+cd /opt/solveille && make fetch-swi && make build-swi && make fetch-cp && make tiles
+# `make tiles` génère aussi l'index de recherche communal (front/communes-index.json, via
+# build_search) — gitignoré, généré sur la VM, survit aux `git reset --hard` du déploiement.
+# `make fetch-cp` (codes postaux La Poste, semestriel) est manuel/occasionnel — pas de timer.
 
 # Service API
 cp deploy/systemd/solveille-api.service /etc/systemd/system/

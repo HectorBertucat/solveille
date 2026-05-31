@@ -2,9 +2,9 @@
 # Les cibles `fetch-*`, `build`, `tiles`, `api` appellent le package Python à créer (voir docs/architecture.md).
 # Ce fichier est un CONTRAT d'interface : Claude Code implémente les modules derrière.
 
-.PHONY: setup lint test fetch-all fetch-v0 build build-swi build-piezo build-gaspar tiles api clean \
+.PHONY: setup lint test fetch-all fetch-v0 build build-swi build-piezo build-gaspar tiles search api clean \
         fetch-communes fetch-rga fetch-bascule fetch-insee \
-        fetch-swi fetch-piezo fetch-gaspar fetch-dvf fetch-fideli
+        fetch-swi fetch-piezo fetch-gaspar fetch-dvf fetch-fideli fetch-cp
 
 setup:        ## venv + deps + extensions DuckDB
 	uv sync --extra dev
@@ -26,9 +26,10 @@ fetch-dvf:      ; uv run python -m solveille.ingest.dvf
 fetch-swi:      ; uv run python -m solveille.ingest.swi_catnat
 fetch-piezo:    ; uv run python -m solveille.ingest.hubeau_piezo
 fetch-gaspar:   ; uv run python -m solveille.ingest.gaspar
+fetch-cp:       ; uv run python -m solveille.ingest.codes_postaux
 # v0 « carte de l'enjeu » (statique, sans la dynamique météo/nappes)
 fetch-v0: fetch-communes fetch-rga fetch-bascule fetch-insee fetch-fideli fetch-dvf
-fetch-all: fetch-communes fetch-rga fetch-fideli fetch-dvf fetch-swi fetch-piezo fetch-gaspar
+fetch-all: fetch-communes fetch-rga fetch-fideli fetch-dvf fetch-swi fetch-piezo fetch-gaspar fetch-cp
 
 build:        ## transformations DuckDB complètes + mart commune_pression
 	uv run python -m solveille.transform.build
@@ -42,8 +43,12 @@ build-piezo:  ## refresh IPS léger (quotidien) : piézo + mart (réutilise stag
 build-gaspar: ## refresh GASPAR léger (hebdo) : catnat + H + mart (réutilise commune_swi_hist)
 	uv run python -m solveille.transform.build gaspar
 
-tiles:        ## génère les PMTiles (tippecanoe)
+tiles:        ## génère les PMTiles (tippecanoe) + l'index de recherche communal
 	uv run python -m solveille.transform.tiles
+	uv run python -m solveille.transform.build_search
+
+search:       ## (re)génère uniquement l'index de recherche communal (front/communes-index.json)
+	uv run python -m solveille.transform.build_search
 
 api:          ## lance FastAPI en local
 	uv run uvicorn solveille.api.main:app --reload

@@ -3,6 +3,8 @@ data/
 *.parquet
 *.duckdb
 tiles/out/
+# Index de recherche communal : artefact généré (make tiles/search), servi depuis front/ sur la VM.
+front/communes-index.json
 
 # Secrets / réglages machine
 .env

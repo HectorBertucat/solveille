@@ -19,6 +19,6 @@
 	# App shell (index.html + app.js) en `no-cache` : Cloudflare/le navigateur **revalident
 	# via ETag** → un déploiement se propage immédiatement (sinon le défaut CDN de 4 h sert un
 	# front périmé). Les PMTiles/données restent cacheables (long TTL).
-	@appshell path / /index.html /app.js
+	@appshell path / /index.html /app.js /communes-index.json
 	header @appshell Cache-Control "no-cache"
 }
