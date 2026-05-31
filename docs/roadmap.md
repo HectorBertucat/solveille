@@ -40,11 +40,13 @@ Construire dans l'ordre. Chaque incrément doit être démontrable et utile en s
 
 ## v2 — « Calibration + agent »
 **But** : profondeur analytique et interface agent.
-- [ ] **GASPAR** sécheresse → `catnat_secheresse` ; relation empirique SWI/IPS ↔ années de reconnaissance → lecture « X % des situations ayant mené à un arrêté » (`H`, indicatif).
-- [ ] Analyse de tendance (rapprochement du seuil).
-- [ ] **Serveur MCP** : interroger la pression d'une commune/adresse en langage naturel (réutilise `/lookup`).
-- [ ] (Option) raffinement **IRIS** ; pondération **population INSEE**.
-**Démonstration v2** : « les conditions actuelles ressemblent à X % des situations passées à risque ici » + requêtes en langage naturel.
+- [x] **GASPAR** sécheresse → `catnat_secheresse` ; relation empirique SWI ↔ périodes de reconnaissance → `H` = CDF empirique « X % des situations ayant mené à un arrêté ici » (indicatif). Branché mart/API/front (bloc « Calibration historique »), timer hebdo, **en prod**. ADR-019, `metric.md §H`. ✅ **Livré.**
+- [ ] Analyse de tendance (rapprochement du seuil) — *non commencé*.
+- [ ] **Serveur MCP** : interroger la pression d'une commune/adresse en langage naturel (réutilise `/lookup`) — *non commencé*.
+- [ ] (Option) raffinement **IRIS** ; pondération **population INSEE** — *non commencé*.
+- [ ] (Option, hérité v1.1) BDLISA libre/captive pour `f_nappe` ; `chroniques_tr` intra-mois.
+**Chiffres v2** : 47 576 arrêtés sécheresse (1990→2025), 14 229 communes ; `H` calibré sur le SWI historique, pooling départemental. Build national ~3 s.
+**Démonstration v2** : « les conditions actuelles ressemblent à X % des situations passées à risque ici » (✅ fait) + requêtes en langage naturel (MCP, à venir).
 
 ## Transverse (tout du long)
 - Lint **ruff** + typage **mypy** + **pytest** ; CI légère (lint+tests sur échantillon).
