@@ -53,8 +53,17 @@ class CommunePression(BaseModel):
     ip_rga_score: float | None = None
     ip_rga_niveau: str | None = None
     ip_rga_niveau_code: int | None = None
+    # v2 — calibration historique H (Cat-Nat sécheresse GASPAR) ; complémentaire, hors score.
+    h_proba: float | None = None  # H du mois servi (gaté E>0)
+    h_n_events: int | None = None  # taille du pool d'évènements reconnus
+    h_pool_level: str | None = None  # 'departement' | 'national'
+    H_latest: float | None = None  # H du dernier mois (mart statique)
+    catnat_freq: int | None = None  # nb d'arrêtés sécheresse de la commune
+    dernier_arrete: str | None = None  # date du dernier arrêté (ISO)
+    annees_reco: list[int] | None = None  # années de reconnaissance
     last_updated_swi: str | None = None
     last_updated_ips: str | None = None
+    last_updated_gaspar: str | None = None
 
 
 class SerieMois(BaseModel):

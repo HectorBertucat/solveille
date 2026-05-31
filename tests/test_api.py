@@ -139,6 +139,51 @@ _MENSUEL_OLD = """SELECT * FROM (VALUES ('31555', DATE '2025-12-01', -1.2, 0.77,
     ip_rga_niveau_code)"""
 
 
+# Mart v2 (avec calibration H) : statique + mensuel portent les colonnes H/GASPAR.
+_LU9 = _LU + ",'2026-05-31'"  # + last_updated_gaspar
+_MART_H = f"""SELECT * FROM (VALUES
+    ('31555','Toulouse','31','2025-12-01', 0.878, 21578.0, 7.6e9, 3760.0, FALSE,
+     45, 'Élevée', 0.36::DOUBLE, 19::BIGINT, DATE '2023-07-23', [1991, 2003, 2023], {_LU9}),
+    ('75056','Paris','75','2025-12-01', 0.0, NULL::DOUBLE, NULL::DOUBLE, NULL::DOUBLE, FALSE,
+     0, NULL::VARCHAR, NULL::DOUBLE, NULL::BIGINT, NULL::DATE, NULL::INTEGER[], {_LU9})
+  ) t(insee, nom, code_dept, date, E, n_maisons_exposees, valeur_bati_exposee_eur,
+      prix_median_maison_eur_m2, basculement_2026, ip_rga_score, ip_rga_niveau,
+      H_latest, catnat_freq, dernier_arrete, annees_reco,
+      last_updated_admin_express, last_updated_rga, last_updated_bascule, last_updated_insee,
+      last_updated_fideli, last_updated_dvf, last_updated_swi, last_updated_ips,
+      last_updated_gaspar)"""
+_MENSUEL_H = """SELECT * FROM (VALUES
+    ('31555', DATE '2025-12-01', -1.2, 0.77, 0.77, 45, 'Élevée', 4, 0.36::DOUBLE, 2263::BIGINT,
+     'departement'),
+    ('75056', DATE '2025-12-01', -1.2, 0.77, 0.77, 0, NULL::VARCHAR, NULL::INTEGER,
+     NULL::DOUBLE, NULL::BIGINT, NULL::VARCHAR)
+  ) t(insee, date_mois, z_swi, dry_swi, T, ip_rga_score, ip_rga_niveau, ip_rga_niveau_code,
+      h_proba, h_n_events, h_pool_level)"""
+
+
+def test_api_exposes_h(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    mart = tmp_path / "commune_pression.parquet"
+    mensuel = tmp_path / "commune_pression_mensuel.parquet"
+    with duckdb_io.connection() as con:
+        con.execute(f"COPY ({_MART_H}) TO '{mart}' (FORMAT PARQUET)")
+        con.execute(f"COPY ({_MENSUEL_H}) TO '{mensuel}' (FORMAT PARQUET)")
+    monkeypatch.setattr(deps, "mart_path", lambda: mart)
+    monkeypatch.setattr(deps, "mensuel_path", lambda: mensuel)
+    monkeypatch.setattr(deps, "seuils_path", lambda: tmp_path / "absent.json")
+    client = TestClient(app)
+    f = client.get("/communes/31555").json()
+    assert f["h_proba"] == pytest.approx(0.36) and f["h_pool_level"] == "departement"
+    assert f["h_n_events"] == 2263 and f["H_latest"] == pytest.approx(0.36)
+    assert f["catnat_freq"] == 19
+    assert f["dernier_arrete"] == "2023-07-23"  # DATE → ISO str
+    assert f["annees_reco"] == [1991, 2003, 2023]  # INTEGER[] → liste
+    # Paris (E=0) : H gaté NULL côté mart
+    p = client.get("/communes/75056").json()
+    assert p["h_proba"] is None and p["H_latest"] is None
+    # /meta expose last_updated_gaspar
+    assert client.get("/meta").json()["last_updated_gaspar"] == "2026-05-31"
+
+
 def test_api_tolerant_to_old_mart_schema(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     mart = tmp_path / "commune_pression.parquet"
     mensuel = tmp_path / "commune_pression_mensuel.parquet"

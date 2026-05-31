@@ -28,6 +28,9 @@ _MENSUEL_COLS = (
     "ip_rga_score",
     "ip_rga_niveau",
     "ip_rga_niveau_code",
+    "h_proba",
+    "h_n_events",
+    "h_pool_level",
 )
 
 
@@ -72,6 +75,9 @@ def fetch_commune(insee: str, mois: str | None = None) -> dict[str, Any] | None:
         if row is None:
             return None
         out = dict(zip(cols, row, strict=True))
+        # `dernier_arrete` (GASPAR) est une DATE DuckDB → ISO string pour la sérialisation JSON.
+        if out.get("dernier_arrete") is not None:
+            out["dernier_arrete"] = str(out["dernier_arrete"])
 
         mp = mensuel_path()
         if mp.exists():
@@ -140,6 +146,9 @@ def fetch_meta() -> dict[str, Any]:
             c[0] for c in con.execute(f"SELECT * FROM read_parquet('{p}') LIMIT 0").description
         }
         lu_ips = "any_value(last_updated_ips)" if "last_updated_ips" in cols0 else "NULL"
+        # Tolérant au schéma : `last_updated_gaspar` absent si le mart n'a pas été reconstruit
+        # avec le code v2 (déploiement code/données dissocié — sinon 500 en prod).
+        lu_gaspar = "any_value(last_updated_gaspar)" if "last_updated_gaspar" in cols0 else "NULL"
         row = con.execute(
             f"""
             SELECT count(*)                                   AS n_communes,
@@ -155,7 +164,8 @@ def fetch_meta() -> dict[str, Any]:
                    any_value(last_updated_fideli)             AS last_updated_fideli,
                    any_value(last_updated_dvf)                AS last_updated_dvf,
                    any_value(last_updated_swi)                AS last_updated_swi,
-                   {lu_ips}                                   AS last_updated_ips
+                   {lu_ips}                                   AS last_updated_ips,
+                   {lu_gaspar}                                AS last_updated_gaspar
             FROM read_parquet('{p}')
             """
         ).fetchone()
@@ -174,6 +184,7 @@ def fetch_meta() -> dict[str, Any]:
             "last_updated_dvf",
             "last_updated_swi",
             "last_updated_ips",
+            "last_updated_gaspar",
         ]
         meta = dict(zip(cols, row, strict=True)) if row else {}
         meta["dernier_mois"] = str(meta["dernier_mois"]) if meta.get("dernier_mois") else None
