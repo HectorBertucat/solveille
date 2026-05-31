@@ -17,3 +17,17 @@ METROPOLE_L93_BBOX: tuple[float, float, float, float] = (
     1_310_000.0,
     7_150_000.0,
 )
+
+
+def dept_expr_from_insee(col: str = "code_insee") -> str:
+    """Expression SQL DuckDB dérivant le **code département** d'un code INSEE commune `col`.
+
+    Métropole = 2 premiers caractères ; **Corse 2A/2B** (codes INSEE `2A…`/`2B…`) ; **DROM**
+    `97x`/`98x` = 3 premiers caractères. Source **unique** partagée (staging GASPAR, calibration
+    `H`) du bornage/poolage par département.
+    """
+    return (
+        f"CASE WHEN substr({col}, 1, 2) IN ('2A', '2B') THEN substr({col}, 1, 2) "
+        f"WHEN substr({col}, 1, 2) IN ('97', '98') THEN substr({col}, 1, 3) "
+        f"ELSE substr({col}, 1, 2) END"
+    )

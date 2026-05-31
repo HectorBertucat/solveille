@@ -216,6 +216,43 @@ def confiance_ips(
     return clamp01(f_hist * f_nappe * f_repr)
 
 
+#: Taille minimale du pool **départemental** de sévérités d'évènements reconnus pour calibrer
+#: `H` localement ; en deçà, repli sur le pool **national** (cf. `h_empirical_cdf`, ADR-019).
+H_MIN_POOL_DEPT = 30
+
+#: Longueur **maximale** (mois) de la fenêtre d'un évènement reconnu pour la recherche du pic de
+#: sévérité. Les périodes GASPAR `[dat_deb, dat_fin]` sont très hétérogènes (médiane 5 mois mais
+#: **jusqu'à ~160 mois**) ; un `max(−z_SWI)` sur une fenêtre de 13 ans capterait un outlier sans
+#: rapport avec la reconnaissance. On borne donc le pic aux `H_EVENT_MAX_MONTHS` mois finissant à
+#: `dat_fin` (couvre une sécheresse pluri-saisonnière type 2022-2023, hors fenêtres aberrantes).
+H_EVENT_MAX_MONTHS = 24
+
+
+def severite(z: float | None) -> float | None:
+    """Sévérité de sécheresse `s = -z` (anomalie standardisée) : sec (`z<0`) ⇒ `s>0`, humide
+    ⇒ `s<0`. None ⇒ None. Convention partagée SWI/`H` (monotone **décroissante** en `z`)."""
+    return None if z is None else -z
+
+
+def h_empirical_cdf(s_now: float | None, pool: Sequence[float | None]) -> float | None:
+    """Calibration historique `H` ∈ [0, 1] : **CDF empirique** de la sévérité courante `s_now`
+    dans le `pool` des **sévérités-pics** des évènements ayant conduit à une reconnaissance.
+
+    `H = #{s ∈ pool : s ≤ s_now} / #pool` — part des situations reconnues **au plus aussi
+    sévères** qu'aujourd'hui. Sec extrême ⇒ `H→1` ; conditions normales/humides ⇒ `H→0`.
+    **Monotone croissante en `s_now`** (donc en sécheresse, donc en `T`). None si `s_now` None
+    ou `pool` vide. **Indicatif** : « la sécheresse actuelle ≥ X % des situations reconnues
+    ici » — *pas* une probabilité de reconnaissance (GASPAR ne liste que des positifs).
+    Référence Python du calcul SQL (`transform/h_calib`) — parité testée.
+    """
+    if s_now is None:
+        return None
+    sample = [float(s) for s in pool if s is not None]
+    if not sample:
+        return None
+    return sum(1 for s in sample if s <= s_now) / len(sample)
+
+
 def ip_rga_score(e: float | None, t: float | None, *, gamma: float = GAMMA) -> int | None:
     """Score IP-RGA ∈ [0, 100] : `round(100·E·T^γ)`. None si E ou T manquant.
 

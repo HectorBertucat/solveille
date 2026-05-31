@@ -22,6 +22,12 @@ USER_AGENT = "solveille/0.1 (+https://github.com/hectorbertucat/solveille)"
 #: navigée/affichée. Voir ADR-016. Le dernier mois est dynamique (max des données).
 SWI_SERVED_FROM = "2017-01-01"
 
+#: Début de la fenêtre de **calibration `H`** (v2) : on calcule les `z_SWI` communaux passés
+#: jusqu'ici pour caractériser la sévérité des évènements Cat-Nat sécheresse reconnus (les
+#: premières reconnaissances datent de 1990). Distinct de la fenêtre SERVIE (2017→) et de la
+#: climatologie (tout l'historique). Voir `docs/metric.md §H`, ADR-019.
+SWI_CALIB_FROM = "1990-01-01"
+
 
 class Settings(BaseSettings):
     """Réglages d'ingestion et de calcul (immuables après chargement)."""

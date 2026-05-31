@@ -14,7 +14,7 @@ import duckdb
 from solveille.common import duckdb_io
 from solveille.common.archive import extract_7z, extract_zip
 from solveille.common.config import SWI_SERVED_FROM, get_settings
-from solveille.common.geo import METROPOLE_L93_BBOX
+from solveille.common.geo import METROPOLE_L93_BBOX, dept_expr_from_insee
 from solveille.common.logging import get_logger
 
 log = get_logger("solveille.transform.staging")
@@ -35,11 +35,7 @@ SOURCE_SWI = "swi_catnat"
 SOURCE_GASPAR = "gaspar"
 
 #: Dérive le code département depuis un code INSEE commune (Corse 2A/2B, DROM 97x/98x).
-_DEPT_FROM_INSEE = (
-    "CASE WHEN substr(code_insee, 1, 2) IN ('2A', '2B') THEN substr(code_insee, 1, 2) "
-    "WHEN substr(code_insee, 1, 2) IN ('97', '98') THEN substr(code_insee, 1, 3) "
-    "ELSE substr(code_insee, 1, 2) END"
-)
+_DEPT_FROM_INSEE = dept_expr_from_insee("code_insee")
 
 # Codes d'arrondissements municipaux (Paris/Lyon/Marseille) à exclure pour éviter le
 # double comptage avec la commune entière (75056 / 69123 / 13055).
