@@ -44,7 +44,23 @@ déployées et vérifiées. État précis :
 > puis **B-plot (Observable)** ; **deck.gl** en dernier (ambitieux). Tout est **client-side ou perf**,
 > sauf si on veut un nouvel attribut de tuile (préciser en plan).
 
-### B-vec — Basemap VECTORIEL clair + labels AU-DESSUS du choroplèthe + self-host glyphs
+### B-vec — Basemap VECTORIEL ✅ LIVRÉ (local) — attend déploiement VM
+**FAIT** (commit `feat(front): fond vectoriel Protomaps self-hosté`, ADR-020, 118 tests, lint OK,
+validé chrome-devtools en contexte frais) : fond **Protomaps** self-hosté (`france.pmtiles` z0–12 via
+`/tiles` Range, plomberie de `communes.pmtiles`), couches pré-générées `front/basemap-layers.js`
+(`tools/gen_basemap.mjs`, flavors clair/sombre, **icônes retirées → 0 sprite**), choroplèthe inséré
+**sous la 1ʳᵉ couche `symbol`** ⇒ **labels villes/départements AU-DESSUS du fill** (opacité 0.78→0.62) ;
+**glyphs Noto Sans self-hostés** (`make glyphs`, 3 fontes ×256 plages, gitignoré) — couverture
+complète (la nav. Europe demande cyrillique/arabe), test `test_basemap_glyphs.py` ; clair/sombre via
+`setStyle(buildStyle(theme))`. **RESTE (déploiement VM, accord requis)** : push (CI = code) PUIS, sur
+la VM, `make glyphs` (≈13 Mo) + `make basemap` (= `deploy/build-basemap.sh` ; go-pmtiles + extract
+France z12 du planet daté `build.protomaps.com`, ~1–1,5 Go, atomique) + `systemctl reload caddy`
+(Caddyfile : `*.pmtiles` hors `encode`, `/glyphs/*` cache long, `basemap-layers.js` no-cache).
+Vérifier ensuite en contexte frais : labels au-dessus, glyphs **200** (un 404 = carte noire),
+`france.pmtiles` **206** (Range), clair/sombre, 3D.
+
+<details><summary>Brief original (référence)</summary>
+
 **Pourquoi** : aujourd'hui le fond est un **raster CARTO** (`light_all/dark_all`) sous le fill 0.78 → les
 **noms de lieux sont noyés** sous le choroplèthe. Un basemap **vectoriel** permet de remettre les labels
 de villes/communes **au-dessus** du fill (lecture pro, type Datawrapper/FT).
@@ -61,6 +77,7 @@ de villes/communes **au-dessus** du fill (lecture pro, type Datawrapper/FT).
 - ⚠️ **Re-tester** : dark/light (le basemap vectoriel a sa propre palette → adapter aux tokens si possible),
   couverture (les labels ne doivent pas masquer le choroplèthe), perf (vecteur = plus de couches).
 **Refs** : CARTO `gl-styles` GitHub, Protomaps `basemaps`/`protomaps-themes-base`, MapLibre `addLayer(beforeId)`.
+</details>
 
 ### B-perf — pmtiles/index immutable+hash OU endpoint MVT z/x/y
 **Constat actuel** : CF sert `/tiles/communes.pmtiles` en **`cf-cache-status: DYNAMIC`** (Range 206 OK,

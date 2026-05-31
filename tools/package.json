@@ -1,0 +1,9 @@
+{
+  "name": "solveille-basemap-tools",
+  "private": true,
+  "type": "module",
+  "description": "One-shot générateur du style basemap vectoriel (Protomaps) self-hosté. node tools/gen_basemap.mjs",
+  "dependencies": {
+    "@protomaps/basemaps": "5.7.2"
+  }
+}

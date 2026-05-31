@@ -3,7 +3,10 @@
 #   argile.hectorb.fr → http://localhost:8083  (public hostname ajouté côté dashboard)
 # Importé par /etc/caddy/Caddyfile :  import /opt/solveille/deploy/Caddyfile
 :8083 {
-	encode zstd gzip
+	# Compression SAUF *.pmtiles : gzip casse les requêtes Range (→ 200 fichier entier au lieu de
+	# 206) et corrompt la lecture des tuiles. Les glyphs .pbf, eux, sont des GET pleins → compressés.
+	@notpmtiles not path *.pmtiles
+	encode @notpmtiles zstd gzip
 
 	# uvicorn (solveille-api.service) sert l'API + le front + les PMTiles sur 127.0.0.1:8001.
 	reverse_proxy localhost:8001
@@ -16,9 +19,13 @@
 	}
 	# Note : l'en-tête noindex (garde-fou DVF) est posé par l'app FastAPI et traverse Caddy.
 
-	# App shell (index.html + app.js) en `no-cache` : Cloudflare/le navigateur **revalident
-	# via ETag** → un déploiement se propage immédiatement (sinon le défaut CDN de 4 h sert un
-	# front périmé). Les PMTiles/données restent cacheables (long TTL).
-	@appshell path / /index.html /app.js /communes-index.json
+	# App shell (index.html + app.js + couches du basemap) en `no-cache` : Cloudflare/le navigateur
+	# **revalident via ETag** → un déploiement se propage immédiatement (sinon le défaut CDN de 4 h
+	# sert un front périmé). Les PMTiles/données restent cacheables (long TTL).
+	@appshell path / /index.html /app.js /basemap-layers.js /communes-index.json
 	header @appshell Cache-Control "no-cache"
+
+	# Glyphs PBF du fond vectoriel : immuables (Noto Sans figés) → cache long, gain d'egress.
+	@glyphs path /glyphs/*
+	header @glyphs Cache-Control "public, max-age=2592000, immutable"
 }

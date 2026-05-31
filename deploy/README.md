@@ -38,8 +38,17 @@ cd /opt/solveille && uv sync --locked
 #   (depuis le poste local)  rsync -az data/staging/ root@<vm>:/opt/solveille/data/staging/
 cd /opt/solveille && make fetch-swi && make build-swi && make fetch-cp && make tiles
 # `make tiles` génère aussi l'index de recherche communal (front/communes-index.json, via
-# build_search) — gitignoré, généré sur la VM, survit aux `git reset --hard` du déploiement.
+# build_search) ET, en prérequis, les glyphs du fond vectoriel (make glyphs → front/glyphs/) —
+# tous gitignorés, générés sur la VM, survivent aux `git reset --hard` du déploiement.
 # `make fetch-cp` (codes postaux La Poste, semestriel) est manuel/occasionnel — pas de timer.
+
+# Fond de carte VECTORIEL (B-vec, ADR-020) — une fois : extrait France du planet Protomaps.
+make basemap   # = deploy/build-basemap.sh : go-pmtiles + extract France z0-12 → tiles/out/france.pmtiles
+#              (~1–1,5 Go, requêtes Range comme communes.pmtiles ; NE PAS compresser). MAXZOOM=13
+#              pour une marge. À relancer si on veut rafraîchir le fond OSM (rare → pas de timer).
+#   ⚠️ glyphs : un seul /glyphs/*.pbf en 404 = carte NOIRE → vérifier `make glyphs` OK (front/glyphs/
+#   peuplé) et, en prod, surveiller le Network. `france.pmtiles` manquant = pas de fond (dégradé) mais
+#   le choroplèthe rend quand même.
 
 # Service API
 cp deploy/systemd/solveille-api.service /etc/systemd/system/

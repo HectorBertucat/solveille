@@ -86,57 +86,79 @@ const savedTheme = (() => { try { return localStorage.getItem("solveille_theme")
 if (savedTheme === "dark") document.documentElement.dataset.theme = "dark";
 readPalette();
 const themeNow = () => (document.documentElement.dataset.theme === "dark" ? "dark" : "light");
-const BASEMAP = {
-  light: "https://a.basemaps.cartocdn.com/light_all/{z}/{x}/{y}.png",
-  dark: "https://a.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png",
-};
+// --- Fond de carte VECTORIEL self-hosté (B-vec). Remplace le raster CARTO : les LIBELLÉS du
+// basemap (villes, départements, eaux) passent AU-DESSUS du choroplèthe (insérés sous la 1ʳᵉ
+// couche `symbol`) → lecture pro, type Datawrapper/FT. Tuiles Protomaps + glyphs Noto Sans, 100 %
+// servis depuis notre origine (0 CDN runtime) : `/tiles/france.pmtiles` + `/glyphs/…`. ---
+const BASEMAP_PMTILES = "pmtiles://" + location.origin + "/tiles/france.pmtiles";
+const GLYPHS_URL = location.origin + "/glyphs/{fontstack}/{range}.pbf";
+const BASEMAP_ATTRIB =
+  "© OpenStreetMap (ODbL), Protomaps — RGA: Géorisques/BRGM · SWI: Météo-France · " +
+  "Nappes: Hub'eau/ADES-BRGM · DVF: DGFiP/Etalab · IGN · Insee · SDES";
+
+// Nos 4 couches de données, insérées sous les labels du basemap. `fill-opacity` 0.62 (vs 0.78
+// avant) : laisse respirer roads/eaux/labels du fond vectoriel sous le tint de pression.
+function communesLayers() {
+  return [
+    {
+      id: "communes-fill", type: "fill", source: "communes", "source-layer": SRC_LAYER,
+      // Transition courte : lisse le saut de couleur d'un mois à l'autre (prev/next, play).
+      paint: { "fill-color": GREY, "fill-opacity": 0.62, "fill-color-transition": { duration: 120, delay: 0 } },
+    },
+    {
+      id: "communes-line", type: "line", source: "communes", "source-layer": SRC_LAYER,
+      paint: { "line-color": "rgba(80,60,40,0.20)", "line-width": 0.3 },
+    },
+    {
+      id: "communes-bascule", type: "line", source: "communes", "source-layer": SRC_LAYER,
+      filter: ["==", ["get", "basculement_2026"], true],
+      paint: { "line-color": "#6d28d9", "line-width": 2 },
+    },
+    {
+      // 3D « montagnes de pression » (B1) : masquée par défaut, activée par le toggle 3D.
+      id: "communes-3d", type: "fill-extrusion", source: "communes", "source-layer": SRC_LAYER,
+      layout: { visibility: "none" },
+      paint: {
+        "fill-extrusion-color": GREY, "fill-extrusion-opacity": 0.85,
+        "fill-extrusion-height": 0,
+        "fill-extrusion-height-transition": { duration: 200, delay: 0 },
+      },
+    },
+  ];
+}
+
+// Style complet pour un thème : couches Protomaps (flavor clair/sombre, posées par
+// front/basemap-layers.js) + nos couches insérées juste AVANT la 1ʳᵉ couche `symbol` → les noms
+// de lieux restent au-dessus du fill. Repli gracieux (juste fond + choroplèthe) si le JS du
+// basemap n'a pas chargé.
+function buildStyle(theme) {
+  const pm = window.PM_BASEMAP; // { light:[…], dark:[…] }
+  const base = (pm ? (theme === "dark" ? pm.dark : pm.light) : []).map((l) => ({ ...l }));
+  const firstSym = base.findIndex((l) => l.type === "symbol");
+  const cut = firstSym < 0 ? base.length : firstSym;
+  const ours = communesLayers();
+  const layers = pm
+    ? [...base.slice(0, cut), ...ours, ...base.slice(cut)]
+    : [{ id: "bg", type: "background", paint: { "background-color": cssVar("--bg") } }, ...ours];
+  return {
+    version: 8,
+    glyphs: GLYPHS_URL,
+    sources: {
+      protomaps: { type: "vector", url: BASEMAP_PMTILES, attribution: BASEMAP_ATTRIB },
+      communes: { type: "vector", url: PMTILES_URL },
+    },
+    layers,
+  };
+}
 
 const map = new maplibregl.Map({
   container: "map",
-  style: {
-    version: 8,
-    glyphs: "https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf",
-    sources: {
-      carto: {
-        type: "raster",
-        tiles: [BASEMAP[themeNow()]],
-        tileSize: 256,
-        attribution: "© OpenStreetMap, © CARTO — RGA: Géorisques/BRGM · SWI: Météo-France · Nappes: Hub'eau/ADES-BRGM · DVF: DGFiP/Etalab · IGN · Insee · SDES",
-      },
-      communes: { type: "vector", url: PMTILES_URL },
-    },
-    layers: [
-      { id: "bg", type: "background", paint: { "background-color": cssVar("--bg") } },
-      { id: "carto", type: "raster", source: "carto", paint: { "raster-opacity": 0.55 } },
-      {
-        id: "communes-fill", type: "fill", source: "communes", "source-layer": SRC_LAYER,
-        // Transition courte : lisse le saut de couleur d'un mois à l'autre (prev/next, play).
-        paint: { "fill-color": GREY, "fill-opacity": 0.78, "fill-color-transition": { duration: 120, delay: 0 } },
-      },
-      {
-        id: "communes-line", type: "line", source: "communes", "source-layer": SRC_LAYER,
-        paint: { "line-color": "rgba(255,255,255,0.5)", "line-width": 0.3 },
-      },
-      {
-        id: "communes-bascule", type: "line", source: "communes", "source-layer": SRC_LAYER,
-        filter: ["==", ["get", "basculement_2026"], true],
-        paint: { "line-color": "#6d28d9", "line-width": 2 },
-      },
-      {
-        // 3D « montagnes de pression » (B1) : masquée par défaut, activée par le toggle 3D.
-        id: "communes-3d", type: "fill-extrusion", source: "communes", "source-layer": SRC_LAYER,
-        layout: { visibility: "none" },
-        paint: {
-          "fill-extrusion-color": GREY, "fill-extrusion-opacity": 0.85,
-          "fill-extrusion-height": 0,
-          "fill-extrusion-height-transition": { duration: 200, delay: 0 },
-        },
-      },
-    ],
-  },
+  style: buildStyle(themeNow()),
+  // CJK rendu via la fonte système → pas de requête (ni 404) sur les plages d'idéogrammes.
+  localIdeographFontFamily: "sans-serif",
   center: [2.4, 46.6],
   zoom: 4.6,
-  minZoom: 4, // tuiles z4→9 : sous z4 il n'y a pas de tuiles (évite une carte vide au dézoom)
+  minZoom: 4, // communes z4→9 (overzoom au-delà) : sous z4 pas de tuiles communes
   maxZoom: 12,
 });
 map.addControl(new maplibregl.NavigationControl(), "bottom-right");
@@ -713,6 +735,17 @@ introEl.addEventListener("keydown", (e) => {
 try { if (!localStorage.getItem("solveille_intro_seen")) openIntro(); } catch (_) { openIntro(); }
 
 // --- B3 : thème clair/sombre (tokens) + légende interactive ---
+// Ré-applique l'état des couches communes après un setStyle (qui les recrée avec leurs valeurs par
+// défaut) : visibilité 2D/3D selon `is3D`, puis couleur + relief du mois courant.
+function applyViewState() {
+  if (map.getLayer("communes-3d")) {
+    map.setLayoutProperty("communes-3d", "visibility", is3D ? "visible" : "none");
+  }
+  if (map.getLayer("communes-fill")) {
+    map.setLayoutProperty("communes-fill", "visibility", is3D ? "none" : "visible");
+  }
+  if (MONTHS.length) paintMonth(idx);
+}
 function applyTheme(theme) {
   const dark = theme === "dark";
   document.documentElement.dataset.theme = dark ? "dark" : "";
@@ -722,9 +755,10 @@ function applyTheme(theme) {
     EXPRS = MONTHS.map((m) => colorExpr("n_" + m.key));
     BIV_EXPRS = MONTHS.map((m) => bivExpr("t_" + m.key)); // le neutre (GREY) suit le thème
   }
-  if (map.getSource("carto")) map.getSource("carto").setTiles([BASEMAP[dark ? "dark" : "light"]]);
-  if (map.getLayer("bg")) map.setPaintProperty("bg", "background-color", cssVar("--bg"));
-  if (MONTHS.length) paintMonth(idx);
+  // Le basemap vectoriel a sa propre palette clair/sombre (flavor Protomaps) → on reconstruit tout
+  // le style, puis on ré-applique l'état dès que le nouveau style est parsé (couches recréées).
+  map.setStyle(buildStyle(theme));
+  map.once("styledata", applyViewState);
 }
 document.getElementById("themeBtn").addEventListener("click", () => {
   applyTheme(themeNow() === "dark" ? "light" : "dark");
