@@ -20,6 +20,16 @@ function readPalette() {
 const NIVEAU_LABELS = { 1: "Très faible", 2: "Faible", 3: "Modérée", 4: "Élevée", 5: "Très élevée" };
 // Texte clair sur fond foncé (niveaux 3-5), sinon encre (0-2).
 function pillInk(code) { return code >= 3 ? "#fff" : "#241c14"; }
+// Hauteurs 3D (m) par niveau : « montagnes de pression » (B1, vue fill-extrusion).
+const NIVEAU_HEIGHT = { 1: 3000, 2: 9000, 3: 18000, 4: 28000, 5: 40000 };
+function heightExpr(attrKey) {
+  return [
+    "match", ["get", attrKey],
+    1, NIVEAU_HEIGHT[1], 2, NIVEAU_HEIGHT[2], 3, NIVEAU_HEIGHT[3],
+    4, NIVEAU_HEIGHT[4], 5, NIVEAU_HEIGHT[5],
+    0,
+  ];
+}
 
 // Classes BRGM de l'IPS (niveau de nappe, 0 sec → 6 humide) — palette divergente brun↔teal.
 const IPS_CLASS_LABELS = ["Très bas", "Bas", "Modérément bas", "Autour de la moyenne",
@@ -86,12 +96,22 @@ const map = new maplibregl.Map({
       },
       {
         id: "communes-line", type: "line", source: "communes", "source-layer": SRC_LAYER,
-        paint: { "line-color": "#ffffff", "line-width": 0.3, "line-opacity": 0.5 },
+        paint: { "line-color": "rgba(255,255,255,0.5)", "line-width": 0.3 },
       },
       {
         id: "communes-bascule", type: "line", source: "communes", "source-layer": SRC_LAYER,
         filter: ["==", ["get", "basculement_2026"], true],
         paint: { "line-color": "#6d28d9", "line-width": 2 },
+      },
+      {
+        // 3D « montagnes de pression » (B1) : masquée par défaut, activée par le toggle 3D.
+        id: "communes-3d", type: "fill-extrusion", source: "communes", "source-layer": SRC_LAYER,
+        layout: { visibility: "none" },
+        paint: {
+          "fill-extrusion-color": GREY, "fill-extrusion-opacity": 0.85,
+          "fill-extrusion-height": 0,
+          "fill-extrusion-height-transition": { duration: 200, delay: 0 },
+        },
       },
     ],
   },
@@ -108,6 +128,7 @@ let EXPRS = []; // expressions de couleur MapLibre pré-compilées (1 par mois) 
 let META = null; // /meta (last_updated_* pour l'overlay « À propos »)
 let CP_DATE = null; // last_updated_cp (depuis communes-index.json)
 let HIST = {}; // histogramme mensuel des niveaux {AAAAMM:[n1..n5]} → compteur de légende
+let is3D = false; // vue 3D (fill-extrusion) active ?
 let idx = 0; // index du mois actif
 let openInsee = null; // commune dont la fiche est ouverte
 let lastSerie = null; // série de la commune ouverte (cache pour le sparkline)
@@ -151,8 +172,11 @@ function updateLegendCount() {
 function paintMonth(i) {
   idx = Math.max(0, Math.min(MONTHS.length - 1, i));
   const mo = MONTHS[idx];
-  if (map.getLayer("communes-fill")) {
-    map.setPaintProperty("communes-fill", "fill-color", EXPRS[idx] || colorExpr("n_" + mo.key));
+  const expr = EXPRS[idx] || colorExpr("n_" + mo.key);
+  if (map.getLayer("communes-fill")) map.setPaintProperty("communes-fill", "fill-color", expr);
+  if (is3D && map.getLayer("communes-3d")) {
+    map.setPaintProperty("communes-3d", "fill-extrusion-color", expr);
+    map.setPaintProperty("communes-3d", "fill-extrusion-height", heightExpr("n_" + mo.key));
   }
   const lbl = monthLabelOf(mo);
   monthLabel.textContent = lbl;
@@ -661,6 +685,19 @@ function applyTheme(theme) {
 document.getElementById("themeBtn").addEventListener("click", () => {
   applyTheme(themeNow() === "dark" ? "light" : "dark");
 });
+
+// --- B1 : vue 3D « montagnes de pression » (fill-extrusion, toggle 2D/3D + pitch). ---
+function toggle3D() {
+  is3D = !is3D;
+  map.setLayoutProperty("communes-3d", "visibility", is3D ? "visible" : "none");
+  map.setLayoutProperty("communes-fill", "visibility", is3D ? "none" : "visible");
+  map.easeTo({ pitch: is3D ? 50 : 0, duration: 600 });
+  const b = document.getElementById("d3Btn");
+  b.classList.toggle("on", is3D);
+  b.setAttribute("aria-pressed", String(is3D));
+  if (MONTHS.length) paintMonth(idx); // applique couleur + hauteur du mois courant
+}
+document.getElementById("d3Btn").addEventListener("click", toggle3D);
 
 // Légende : survol d'une classe → met en avant (atténue les autres segments).
 const gradEl = document.getElementById("grad");

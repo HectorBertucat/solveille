@@ -51,6 +51,7 @@
     .hbtn { border:1px solid rgba(246,239,228,.30); background:transparent; color:var(--header-ink);
             border-radius:7px; padding:7px 10px; font-size:13px; font-family:var(--sans); cursor:pointer; white-space:nowrap; }
     .hbtn:hover { background:rgba(246,239,228,.12); }
+    .hbtn.on { background:var(--accent); color:var(--accent-ink); border-color:transparent; }
     .search { display:flex; gap:6px; align-items:flex-start; }
     .search-box { position:relative; }
     .search input { padding:8px 11px; border:1px solid transparent; border-radius:7px; font-size:13px; width:240px;
@@ -160,6 +161,7 @@
   <header>
     <h1>Solveille <small>· la boussole RGA</small></h1>
     <div class="disclaimer">Indice territorial <b>indicatif</b> — ne prédit pas de fissures par bâtiment, n'est ni un diagnostic ni un conseil d'achat/assurance.</div>
+    <button type="button" class="hbtn" id="d3Btn" aria-pressed="false" title="Vue 3D (relief de pression)">3D</button>
     <button type="button" class="hbtn" id="themeBtn" aria-label="Basculer thème clair/sombre" title="Thème clair/sombre">◐</button>
     <button type="button" class="hbtn" id="aboutBtn" aria-haspopup="dialog">À propos</button>
     <form class="search" id="search" role="search">
