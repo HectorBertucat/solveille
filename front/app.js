@@ -304,7 +304,7 @@ function kv(label, value) {
 // Sparkline SVG (score 0-100 dans le temps), point actif mis en évidence. Valeurs numériques
 // uniquement → construction par DOM namespacé (pas d'innerHTML).
 const SVGNS = "http://www.w3.org/2000/svg";
-function sparkline(serie, activeIso) {
+function sparkline(serie, activeIso, eventYears) {
   const wrap = elt("div", { class: "spark" });
   const pts = serie.filter((p) => p.ip_rga_score != null);
   if (pts.length < 2) return wrap;
@@ -314,6 +314,21 @@ function sparkline(serie, activeIso) {
   svg.setAttribute("preserveAspectRatio", "none");
   const x = (i) => pad + (i * (W - 2 * pad)) / (serie.length - 1);
   const y = (s) => H - pad - (s / 100) * (H - 2 * pad);
+  // Marqueurs d'arrêtés Cat-Nat sécheresse (années de reconnaissance dans la fenêtre affichée) :
+  // tics violets verticaux → relie l'historique GASPAR au fil de pression.
+  if (Array.isArray(eventYears) && eventYears.length) {
+    const years = new Set(eventYears);
+    serie.forEach((p, i) => {
+      if (i && years.has(+p.date_mois.slice(0, 4)) && p.date_mois.slice(5, 7) === "06") {
+        const tick = document.createElementNS(SVGNS, "line");
+        tick.setAttribute("x1", String(x(i))); tick.setAttribute("x2", String(x(i)));
+        tick.setAttribute("y1", "0"); tick.setAttribute("y2", String(H));
+        tick.setAttribute("stroke", "#6d28d9"); tick.setAttribute("stroke-width", "1");
+        tick.setAttribute("stroke-dasharray", "2 2"); tick.setAttribute("opacity", "0.55");
+        svg.appendChild(tick);
+      }
+    });
+  }
   const line = document.createElementNS(SVGNS, "polyline");
   line.setAttribute("fill", "none");
   line.setAttribute("stroke", cssVar("--risk-5"));
@@ -404,7 +419,9 @@ async function renderFiche() {
         lastSerie = (await (await fetch("/communes/" + encodeURIComponent(openInsee) + "/serie")).json()).serie;
       } catch (_) { lastSerie = []; }
     }
-    if (lastSerie && lastSerie.length > 1) body.append(sparkline(lastSerie, mo ? mo.iso : ""));
+    if (lastSerie && lastSerie.length > 1) {
+      body.append(sparkline(lastSerie, mo ? mo.iso : "", f.annees_reco));
+    }
 
     body.append(
       kv("Sécheresse du moment (T)", f.T == null ? "—" : Math.round(f.T * 100) + " %"),
