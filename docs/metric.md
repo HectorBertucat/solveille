@@ -42,8 +42,45 @@ valeur_bati_exposee_eur ≈ n_maisons_exposees(commune) * surface_mediane * prix
 ```
 + `n_tx_zone_exposee_12m` (transactions récentes de maisons en zone exposée → acheteurs potentiellement non avertis, d'autant que le zonage 2026 s'applique aux ventes depuis juillet 2026). `J` sert à **prioriser/illustrer**, pas à gonfler le score de pression.
 
-### H — Calibration historique (v2)
-À partir de GASPAR (arrêtés sécheresse de la commune) et des états SWI/IPS passés, estimer un **seuil empirique** : « les conditions actuelles correspondent à X % des situations ayant conduit à une reconnaissance ici ». **Indicatif** (la reconnaissance dépend aussi de critères administratifs).
+### H — Calibration historique (v2) — `h_proba ∈ [0,1]`
+But : « la sécheresse **actuelle** correspond à **X %** des situations passées ayant conduit à une
+**reconnaissance Cat-Nat sécheresse** ici » — lecture **complémentaire** et **indicative**.
+Atout : le **SWI CatNat est l'indice officiel** d'instruction sécheresse → forte cohérence
+attendue entre nos `z_SWI` passés et les années de reconnaissance. **SWI seul** en v2.0 (IPS
+reporté : couverture/historique trop partiels pour calibrer).
+
+**Substrat** (`transform/h_calib.build_commune_swi_hist`) : `z_SWI` communal mensuel sur **tout
+l'historique de calibration** (`SWI_CALIB_FROM` = 1990 →, premières reconnaissances en 1990),
+distinct de la fenêtre **servie** (2017→) — réutilise `build_swi_anomalie` (plancher abaissé) +
+`build_commune_swi` (mêmes poids maille↔commune, même climatologie ⇒ z_SWI cohérents).
+
+**Définition** (`transform/h_calib.build_commune_h`, réf. Python `metric.severite`/`h_empirical_cdf`) :
+1. **Sévérité** `s = −z_SWI` (sec ⇒ `s>0`).
+2. **Sévérité-pic par évènement reconnu** : pour chaque (commune, arrêté GASPAR), `s_evt =
+   max(−z_SWI)` sur la **fenêtre d'évènement** `[dat_deb, dat_fin]` **bornée** aux
+   `H_EVENT_MAX_MONTHS` (= 24) derniers mois (les périodes GASPAR vont de 0 à ~160 mois — médiane
+   5 ; le cap écarte les fenêtres aberrantes). Une « situation » = un évènement reconnu.
+3. **Pool** des `{s_evt}` par **département** (`z_SWI` déjà standardisé par maille×mois ⇒ seuil de
+   reconnaissance assez homogène ; le département capte l'hétérogénéité résiduelle), **repli
+   national** si < `H_MIN_POOL_DEPT` (= 30) évènements (`h_pool_level` ∈ {departement, national}).
+4. **`H = CDF empirique`** de la sévérité courante `s_now = −z_SWI` (mois servi) dans le pool :
+   `h_proba = #{s_evt ≤ s_now}/#pool` ∈ [0,1], **monotone croissante** en sécheresse (donc en `T`).
+   `h_n_events` = taille du pool. Sec extrême ⇒ `H→1` ; mois normal/humide ⇒ `H→0`.
+
+**Lecture / gating** : `H` est **complémentaire** (n'entre **pas** dans `ip_rga_score`). Affiché
+seulement si `E>0`/`has_rga_coverage` (pas de percentile sécheresse sur une commune non argileuse) ;
+`E=0 ⇒ H` NULL. La commune montre aussi son histoire propre (`catnat_freq`, `dernier_arrete`,
+`annees_reco`) à côté.
+
+**Caveats (à afficher)** : (a) reconnaissance partiellement **administrative** → indicatif, *pas*
+une probabilité de reconnaissance ; (b) GASPAR = **positifs seulement** (pas de négatifs) ⇒ `H` est
+un **percentile de calibration** ; (c) **asymétrie** pic-de-fenêtre (`s_evt`) vs mois courant
+(`s_now`) ⇒ `H` **conservateur** (un mois unique dépasse rarement le pic d'une sécheresse reconnue ;
+`H` ne « monte » franchement que lors d'une sécheresse marquée — comportement voulu d'une boussole
+complémentaire) ; (d) **non-stationnarité** climatique (comme SWI/IPS) ; (e) un évènement **sans
+`z_SWI` mesurable** dans sa fenêtre (antérieur à 1990, trou de données) ne contribue pas au pool —
+`h_n_events` et `H_MIN_POOL_DEPT` comptent donc les évènements **mesurables**. Pooling départemental
+et `SWI_CALIB_FROM`/`H_EVENT_MAX_MONTHS`/`H_MIN_POOL_DEPT` **paramétrables**.
 
 ## Score final
 - **MVP v0** : pas de dynamique. On affiche `E` et `J` (carte de l'enjeu + flag reclassement 2026).
@@ -54,12 +91,16 @@ ip_rga_niveau = bin(ip_rga_score) → {Très faible, Faible, Modérée, Élevée
 ```
 Justification : `E` **borne** le risque possible (pas d'argile ⇒ pas de RGA), `T` **module** selon la sécheresse du moment. `GAMMA=0.8` accentue un peu le contraste sec/humide (`T^0.8 > T` pour `T<1`).
 - **Seuils des 5 niveaux** : **quantiles nationaux** du `ip_rga_score` calculés **sur les communes exposées (`E>0`), poolés sur toute la fenêtre servie** (et non par mois) → seuils **stables** ⇒ couleurs **comparables d'un mois à l'autre** (le curseur de date ne déplace pas l'échelle). Quintiles par défaut (20/40/60/80 %), stockés et exposés via `/meta` (`seuils_niveaux`), documentés. `E=0` ou hors couverture RGA ⇒ `ip_rga_niveau` NULL (affiché « Pas d'argile / hors couverture » via `has_rga_coverage`, jamais un faux « Très faible »).
-- **v2** : intègre `H` (probabilité empirique de reconnaissance) en lecture complémentaire.
+- **v2** : ajoute `H` (**percentile empirique de calibration** vs les sécheresses reconnues, *pas*
+  une probabilité de reconnaissance) en **lecture complémentaire** — `H` n'entre pas dans le score.
 
 ## Propriétés à tester (voir `CONCEPTION.md` §11)
 - `ip_rga_score ∈ [0,100]` ; **monotonie** : à `E` fixe, plus sec (`T`↑) ⇒ score ≥ ; reproductible.
 - `E = 0` ⇒ `ip_rga_score = 0`. Couverture : 100 % des communes ont un `T` (via SWI) même sans IPS.
 - Cohérence temporelle : un mois documenté très sec doit ressortir au-dessus d'un mois humide.
+- **`H` (v2)** : `h_proba ∈ [0,1]` ; **monotonie** (à commune fixe, plus sec ⇒ `H ≥`) ; parité
+  SQL↔`metric.h_empirical_cdf` ; cohérence (un mois de sécheresse marquée — 2017, 2022 — ressort
+  bien au-dessus d'un mois humide ; repli pool national vérifié).
 
 ## Caveats à afficher
 Indice **territorial et indicatif** ; ne prédit pas de fissures par maison ; dépend de modèles (SIM/SWI, IPS) et d'une calibration corrélationnelle ; sources et dates affichées. **N'est pas** un conseil d'achat/assurance ni une expertise.
