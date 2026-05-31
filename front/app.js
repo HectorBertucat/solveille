@@ -88,6 +88,8 @@ map.addControl(new maplibregl.NavigationControl(), "bottom-right");
 // --- État temporel (curseur de date) ---
 let MONTHS = []; // [{key:'202512', iso:'2025-12', y, m}]
 let EXPRS = []; // expressions de couleur MapLibre pré-compilées (1 par mois) — voir A3
+let META = null; // /meta (last_updated_* pour l'overlay « À propos »)
+let CP_DATE = null; // last_updated_cp (depuis communes-index.json)
 let idx = 0; // index du mois actif
 let openInsee = null; // commune dont la fiche est ouverte
 let lastSerie = null; // série de la commune ouverte (cache pour le sparkline)
@@ -154,6 +156,8 @@ document.getElementById("nextM").onclick = () => applyMonth(idx + 1, { refreshPa
 async function initTime() {
   try {
     const meta = await (await fetch("/meta")).json();
+    META = meta;
+    fillIntroDates();
     const md = meta.mois_disponibles;
     if (md && md.min && md.max) MONTHS = monthsBetween(md.min, md.max);
   } catch (_) { /* /meta indisponible : curseur masqué */ }
@@ -403,6 +407,8 @@ async function initSearch() {
   if (typeof MiniSearch === "undefined") return; // CDN indispo → recherche désactivée proprement
   let idx;
   try { idx = await (await fetch("communes-index.json")).json(); } catch (_) { return; }
+  CP_DATE = idx.last_updated_cp;
+  fillIntroDates();
   const d = idx.data;
   DOCS = d.insee.map((insee, i) => ({
     id: insee, insee, nom: d.nom[i], dept: d.dept[i], bbox: d.bbox[i],
@@ -519,3 +525,39 @@ document.getElementById("search").addEventListener("submit", (ev) => {
 });
 
 document.addEventListener("click", (e) => { if (!e.target.closest(".search")) closeSuggest(); });
+
+// --- A5 : overlay d'explication (« landing ») ---
+const introEl = document.getElementById("intro");
+function frDate(iso) {
+  if (!iso) return null;
+  const d = new Date(iso);
+  return isNaN(d) ? null : d.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" });
+}
+function setIntroDate(id, iso) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = frDate(iso) || "—";
+}
+// Remplit les dates de fraîcheur des sources (appelée dès que /meta ou l'index sont chargés).
+function fillIntroDates() {
+  if (META) {
+    setIntroDate("lu-rga", META.last_updated_rga);
+    setIntroDate("lu-swi", META.last_updated_swi);
+    setIntroDate("lu-ips", META.last_updated_ips);
+    setIntroDate("lu-gaspar", META.last_updated_gaspar);
+    setIntroDate("lu-ae", META.last_updated_admin_express);
+    setIntroDate("lu-insee", META.last_updated_insee || META.last_updated_fideli);
+    setIntroDate("lu-dvf", META.last_updated_dvf);
+  }
+  if (CP_DATE) setIntroDate("lu-cp", CP_DATE);
+}
+function openIntro() { introEl.hidden = false; }
+function closeIntro() {
+  introEl.hidden = true;
+  try { localStorage.setItem("solveille_intro_seen", "1"); } catch (_) { /* stockage indispo */ }
+}
+document.getElementById("aboutBtn").addEventListener("click", openIntro);
+document.getElementById("introGo").addEventListener("click", closeIntro);
+introEl.addEventListener("click", (e) => { if (e.target === introEl) closeIntro(); }); // clic backdrop
+document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !introEl.hidden) closeIntro(); });
+// 1er chargement : afficher l'intro une fois (puis mémorisée).
+try { if (!localStorage.getItem("solveille_intro_seen")) openIntro(); } catch (_) { openIntro(); }

@@ -80,12 +80,41 @@
     .h-chip { display:inline-block; padding:2px 9px; border-radius:6px; font-weight:700; font-size:12.5px; }
     .h-note { font-size:11px; color:var(--muted); margin-top:7px; line-height:1.4; }
     .h-hist { font-size:12px; color:#444; margin-top:6px; }
+    /* Bouton « À propos » (header) */
+    .about-btn { border:1px solid rgba(255,255,255,.35); background:transparent; color:#fff;
+                 border-radius:6px; padding:7px 11px; font-size:13px; cursor:pointer; white-space:nowrap; }
+    .about-btn:hover { background:rgba(255,255,255,.12); }
+    /* Overlay d'explication (A5 — landing) */
+    .intro { position:fixed; inset:0; z-index:20; background:rgba(20,20,30,.55);
+             display:flex; align-items:flex-start; justify-content:center; padding:5vh 16px; overflow:auto; }
+    .intro[hidden] { display:none; }
+    .intro-card { background:#fff; max-width:660px; width:100%; border-radius:14px; padding:28px 30px;
+                  box-shadow:0 20px 60px rgba(0,0,0,.35); }
+    .intro-card h2 { margin:0 0 2px; font-size:24px; }
+    .intro-card .sub { color:var(--muted); font-size:14px; margin-bottom:18px; }
+    .intro-card h3 { font-size:13px; text-transform:uppercase; letter-spacing:.5px; color:#9b2226;
+                     margin:20px 0 6px; }
+    .intro-card p { font-size:14.5px; line-height:1.55; margin:6px 0; }
+    .intro-card ul { font-size:14px; line-height:1.5; margin:6px 0; padding-left:18px; }
+    .intro-card li { margin:4px 0; }
+    .intro-card .warn { background:#fbf3ee; border:1px solid #f0e0d6; border-radius:8px;
+                        padding:11px 13px; font-size:13.5px; color:#5a3a2a; margin-top:14px; }
+    .intro-card .src { display:flex; justify-content:space-between; gap:14px; font-size:12.5px;
+                       padding:5px 0; border-top:1px solid #f1f1f4; }
+    .intro-card .src .d { color:var(--muted); font-variant-numeric:tabular-nums; white-space:nowrap; }
+    .intro-foot { display:flex; justify-content:space-between; align-items:center; gap:12px; margin-top:22px; }
+    .intro-foot .go { border:none; background:#9b2226; color:#fff; font-weight:600; font-size:14px;
+                      padding:10px 20px; border-radius:8px; cursor:pointer; }
+    .intro-foot .go:hover { background:#b5292d; }
+    .intro-foot .lic { color:var(--muted); font-size:11.5px; }
+    @media (max-width:560px) { .intro-card { padding:22px 18px; } }
   </style>
 </head>
 <body>
   <header>
     <h1>Solveille <small>· la boussole RGA</small></h1>
     <div class="disclaimer">Indice territorial <b>indicatif</b> — ne prédit pas de fissures par bâtiment, n'est ni un diagnostic ni un conseil d'achat/assurance.</div>
+    <button type="button" class="about-btn" id="aboutBtn" aria-haspopup="dialog">À propos</button>
     <form class="search" id="search" role="search">
       <div class="search-box">
         <input id="q" placeholder="Commune, code postal ou INSEE…" autocomplete="off"
@@ -115,6 +144,66 @@
     <span class="month" id="monthLabel">—</span>
   </div>
   <aside class="panel" id="panel"></aside>
+
+  <!-- A5 — overlay d'explication (1er chargement + ré-ouvrable via « À propos ») -->
+  <div class="intro" id="intro" role="dialog" aria-modal="true" aria-labelledby="introTitle" hidden>
+    <div class="intro-card">
+      <h2 id="introTitle">Solveille</h2>
+      <div class="sub">La veille des sols argileux — pression sécheresse-argiles (RGA) par commune.</div>
+
+      <h3>Qu'est-ce que c'est ?</h3>
+      <p>Solveille est un <b>nowcast</b> (état du moment) de la <b>pression sécheresse-argiles</b> par
+      commune, en France métropolitaine. Quand un sol argileux se dessèche puis se réhumidifie, il se
+      rétracte et gonfle (<b>retrait-gonflement des argiles, RGA</b>) — ce qui fissure les maisons. La
+      carte croise l'<b>exposition</b> des sols argileux, la <b>sécheresse en cours</b>, le <b>bâti
+      exposé</b> et l'historique des <b>catastrophes naturelles</b>.</p>
+
+      <h3>Pourquoi ?</h3>
+      <p>Le RGA est le <b>premier poste d'indemnisation</b> au titre des catastrophes naturelles en
+      France. Un <b>nouveau zonage réglementaire</b> (1ᵉʳ juillet 2026) impose une étude géotechnique à
+      la vente de terrains constructibles en zone d'exposition moyenne ou forte. Savoir où la pression
+      est élevée — et comment elle évolue — devient un enjeu pour les propriétaires, les collectivités
+      et les assureurs.</p>
+
+      <h3>Comment lire la carte ?</h3>
+      <ul>
+        <li><b>Couleur</b> = niveau de pression du mois affiché (très faible → très élevé). Gris = pas
+        d'argile ou hors zonage.</li>
+        <li>Pression = <b>exposition argile (E)</b> × <b>sécheresse du moment (T)</b>. E vient du zonage
+        BRGM ; T est l'anomalie d'humidité des sols (SWI Météo-France, lissée sur 3 mois), affinée par
+        le niveau des <b>nappes</b> (IPS) là où une station est représentative.</li>
+        <li><b>Curseur de date</b> (en bas) : rejouez l'historique mensuel 2017→2025 — l'été 2022
+        ressort nettement.</li>
+        <li><b>Cliquez une commune</b> : score 0-100, composantes, bâti exposé, et <b>calibration
+        historique (H)</b> — à quel point la sécheresse du moment ressemble aux situations passées ayant
+        conduit à une reconnaissance Cat-Nat sécheresse.</li>
+        <li>Liseré <span style="color:#6d28d9;font-weight:700">violet</span> = commune <b>reclassée au
+        1ᵉʳ juillet 2026</b>.</li>
+      </ul>
+
+      <div class="warn"><b>Indicatif, pas un diagnostic.</b> Solveille est un indicateur
+      <b>territorial</b> : il ne prédit pas de fissures sur un bâtiment précis et ne remplace ni une
+      étude géotechnique, ni un conseil d'achat ou d'assurance.</div>
+
+      <h3>Sources (open data — dernières mises à jour)</h3>
+      <div id="introSources">
+        <div class="src"><span>Exposition argile &amp; zonage 2026 — <b>BRGM / Géorisques</b></span><span class="d" id="lu-rga">—</span></div>
+        <div class="src"><span>Humidité des sols (SWI) — <b>Météo-France</b></span><span class="d" id="lu-swi">—</span></div>
+        <div class="src"><span>Niveau des nappes — <b>Hub'eau / ADES-BRGM</b></span><span class="d" id="lu-ips">—</span></div>
+        <div class="src"><span>Cat-Nat sécheresse — <b>GASPAR / DGPR</b></span><span class="d" id="lu-gaspar">—</span></div>
+        <div class="src"><span>Géométries communales — <b>IGN (ADMIN EXPRESS)</b></span><span class="d" id="lu-ae">—</span></div>
+        <div class="src"><span>Bâti &amp; logement — <b>Insee, SDES (Fidéli)</b></span><span class="d" id="lu-insee">—</span></div>
+        <div class="src"><span>Valeurs foncières (agrégats communaux) — <b>DGFiP / Etalab (DVF)</b></span><span class="d" id="lu-dvf">—</span></div>
+        <div class="src"><span>Codes postaux — <b>La Poste</b></span><span class="d" id="lu-cp">—</span></div>
+      </div>
+
+      <div class="intro-foot">
+        <span class="lic">Open data · Licence Ouverte / ODbL · code open-source</span>
+        <button type="button" class="go" id="introGo">Explorer la carte</button>
+      </div>
+    </div>
+  </div>
+
   <script src="app.js"></script>
 </body>
 </html>
