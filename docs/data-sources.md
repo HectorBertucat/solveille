@@ -44,10 +44,38 @@ Règles communes : reprojeter en **EPSG:2154** dès l'ingestion ; écrire le **b
 - **Confiance** : couverture **très inégale** → l'IPS est un **raffinement local** (le SWI 8 km reste universel). Pondérer par historique + **libre vs captive** (via `codes_bdlisa` → référentiel BDLISA externe, M2). Paginer poliment (`size`≤20000, séquentiel par `code_bss`), cacher, borner par département.
 - **Volume/politesse** : le fetch est borné à **`MAX_HISTORY_YEARS = 35` ans** avant `date_fin` (garde ≥ 30 ans pour la climato BRGM). Sans ça, les stations à très long historique (1899→) ou en pas sous-horaire sur des décennies dépassent largement 20000 pts → fenêtrage récursif lourd et fetch national très long. Le 1er run national reste long (stations Nord = nappes de craie denses) ; le **timer quotidien le remplit incrémentalement** (cache `.cover.json` self-healing entre runs).
 
-## 6. GASPAR — Cat-Nat sécheresse (DGPR) — calibration `H`
-- **Page** : data.gouv `base-nationale-de-gestion-assistee-des-procedures-administratives-relatives-aux-risques-gaspar` (et couche Géorisques « procédures administratives »). CCR publie aussi la liste des arrêtés (J+1/J+2).
-- **Usage** : filtrer les arrêtés **sécheresse / RGA**, clé **code INSEE**, dates → `catnat_secheresse` (fréquence, dernier arrêté). En v2, relier états SWI/IPS passés ↔ années de reconnaissance pour un seuil empirique.
-- **Pièges** : aléas multiples dans GASPAR (filtrer sécheresse géotechnique) ; reconnaissance dépend aussi de critères **administratifs** → calibration **indicative**. Maj < 30 j après J.O.
+## 6. GASPAR — Cat-Nat sécheresse (DGPR/BRGM) — calibration `H`
+*Vérifié live (mai 2026). Licence Ouverte 2.0 — Géorisques / GASPAR (DGPR/BRGM, MTE).*
+- **Acquisition** : archive nationale **`gaspar.zip`** (résolue via l'API data.gouv, jeu
+  `base-nationale-…-gaspar`, ressource dont l'URL finit par `gaspar.zip` → repli direct
+  `https://files.georisques.fr/GASPAR/gaspar.zip`). **Légère** (~6,3 Mo) ; on n'**extrait que
+  `catnat_gaspar.csv`** (l'extrait CATNAT national, ~34 Mo, **tous aléas** : 260 799 lignes). GET
+  conditionnel (ETag), idempotent. `last_updated_gaspar` = `last_modified` ressource. Connecteur
+  `ingest/gaspar.py` ; cadence **hebdomadaire**.
+- **Schéma `catnat_gaspar.csv`** (`;`, UTF-8, dates ISO `YYYY-MM-DD HH:MM:SS`) :
+  `cod_nat_catnat;cod_commune;lib_commune;num_risque_jo;lib_risque_jo;dat_deb;dat_fin;dat_pub_arrete;dat_pub_jo;dat_maj`.
+  - `cod_commune` = **INSEE** (texte : zéros, Corse 2A/2B — **ne jamais caster en int**) ; clé de jointure.
+  - `num_risque_jo` = **code mnémonique texte** (`SEC`, `ICB`, `MVT`, `TMP`…), **pas un entier**
+    (le « 18 » de catnat.net ne s'applique pas). `cod_nat_catnat` = id national de l'arrêté (dédup).
+  - `dat_pub_arrete` = **date de l'arrêté = reconnaissance** (→ « dernier arrêté » / `annees_reco`,
+    décalée ~1 an après l'évènement) ; `dat_deb`/`dat_fin` = **période de l'évènement** (clé du
+    matching `H` — c'est la fenêtre dont on extrait le `z_SWI` passé).
+  - **Granularité** : 1 ligne par (commune × reconnaissance × aléa).
+- **Filtre sécheresse** : `lib_risque_jo = 'Sécheresse'` (équivalent `num_risque_jo = 'SEC'`).
+  Implémenté **insensible casse/accents** (`lower(strip_accents(...))='secheresse'`) avec **self-check**
+  (un seul `num_risque_jo` doit co-occurrer). **47 576** lignes sécheresse nationales, reconnaissances
+  **1990 → 2025**. Le filtrage vit en **staging** (`build_catnat_secheresse`) ; la zone brute reste
+  immuable et complète.
+- **Usage** : `catnat_secheresse` (par commune : `catnat_freq`, `premier/dernier_arrete`,
+  `annees_reco[]`, `evenements[] {dat_deb, dat_fin, annee}`). En v2, relier états `z_SWI` passés ↔
+  périodes d'évènement reconnu → seuil empirique `H` (cf. `metric.md §H`, ADR-019).
+- **Pièges** : `num_risque_jo` est **texte** (`SEC`), pas un entier ; un arrêté couvre **N communes**
+  + correctifs → **dédup (commune × `cod_nat_catnat`)** ; millésime **COG** (codes INSEE historiques →
+  anti-jointure vs `commune`, taux d'orphelins **~0,2 %** observé en Occitanie) ; reconnaissances
+  **seulement** (positifs, pas de négatifs) → `H` = **percentile de calibration**, pas une proba de
+  reconnaissance ; reconnaissance dépend aussi de critères **administratifs** → **indicatif** ;
+  l'API REST `…/api/v1/gaspar/catnat?code_insee=` (**pas** de filtre département → 500) reste un repli
+  **per-commune** ; homonyme data.gouv « Commune de Brocas » (~30 Ko) à **ne pas** utiliser.
 
 ## 7. DVF géolocalisé (DGFiP) — prix médian maison `J`
 - **Page** : data.gouv `demandes-de-valeurs-foncieres-geolocalisees` (CSV/an, ~5 dernières années ; lat/lon **WGS84**, `valeur_fonciere`, `type_local`, `surface_reelle_bati`, `code_commune`…). API DVF+ alternative.
