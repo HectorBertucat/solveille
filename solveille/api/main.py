@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.datastructures import Headers, MutableHeaders
 from starlette.requests import Request
 from starlette.responses import Response
+from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
 from solveille.api import deps
 from solveille.api.deps import MartUnavailableError
@@ -37,46 +38,65 @@ def _mart_etag() -> str | None:
         return None
 
 
+class NoindexCacheMiddleware:
+    """Garde-fou DVF (X-Robots-Tag noindex) partout + ETag/304/Cache-Control sur les routes data.
+
+    Middleware **ASGI pur** (et surtout PAS `BaseHTTPMiddleware`) : on injecte les en-têtes en
+    emballant `send`, sans jamais bufferiser le corps. `BaseHTTPMiddleware` relit le corps via un
+    flux mémoire et **casse les requêtes Range des gros `FileResponse`** — le PMTiles du fond
+    vectoriel (~1,5 Go) repartait en `200` (fichier entier) au lieu de `206`, de façon *racy*.
+    L'ASGI pur préserve le Range/sendfile natif de StaticFiles (vérifié 32 Mo→1,5 Go).
+
+    `/communes*` et `/meta` sont immuables pour un état donné du mart → **ETag** (mtime des marts) +
+    `Cache-Control` ⇒ revalidation `304` côté CDN/navigateur (le mart change ⇒ ETag change).
+    """
+
+    def __init__(self, app: ASGIApp) -> None:
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+        path: str = scope["path"]
+        cacheable = scope["method"] == "GET" and (path.startswith("/communes") or path == "/meta")
+        etag = _mart_etag() if cacheable else None
+        if etag and Headers(scope=scope).get("if-none-match") == etag:
+            not_modified = Response(status_code=304)
+            not_modified.headers["ETag"] = etag
+            not_modified.headers["Cache-Control"] = _DATA_CACHE_CONTROL
+            not_modified.headers["X-Robots-Tag"] = "noindex, nofollow"
+            await not_modified(scope, receive, send)
+            return
+
+        async def send_with_headers(message: Message) -> None:
+            if message["type"] == "http.response.start":
+                headers = MutableHeaders(raw=message["headers"])
+                headers["X-Robots-Tag"] = "noindex, nofollow"
+                if etag:
+                    headers["ETag"] = etag
+                    headers["Cache-Control"] = _DATA_CACHE_CONTROL
+            await send(message)
+
+        await self.app(scope, receive, send_with_headers)
+
+
 app = FastAPI(
     title="Solveille API",
     version="0.1.0",
     description=f"Nowcast communal de la pression sécheresse–argiles (RGA). {DISCLAIMER}",
 )
 
-# Front statique servi ailleurs (file:// ou autre port) → lecture seule publique.
+# Front statique servi ailleurs (file:// ou autre port) → lecture seule publique. L'ordre importe :
+# CORS d'abord (ajouté en 1ᵉʳ = le plus interne), noindex/cache ensuite ; les deux sont ASGI purs
+# (CORSMiddleware l'est aussi) → le Range natif des PMTiles est préservé de bout en bout.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_methods=["GET"],
     allow_headers=["*"],
 )
-
-
-@app.middleware("http")
-async def add_noindex(
-    request: Request, call_next: Callable[[Request], Awaitable[Response]]
-) -> Response:
-    """Garde-fou DVF (X-Robots-Tag noindex) + cache des routes data (B2).
-
-    Les réponses `/communes*` et `/meta` sont immuables pour un état donné du mart → on pose un
-    **ETag** (mtime des marts) + `Cache-Control` (public, stale-while-revalidate) → Cloudflare/le
-    navigateur revalident en `304` plutôt que de recalculer (le mart change ⇒ ETag change).
-    """
-    path = request.url.path
-    cacheable = request.method == "GET" and (path.startswith("/communes") or path == "/meta")
-    etag = _mart_etag() if cacheable else None
-    if etag and request.headers.get("if-none-match") == etag:
-        not_modified = Response(status_code=304)
-        not_modified.headers["ETag"] = etag
-        not_modified.headers["Cache-Control"] = _DATA_CACHE_CONTROL
-        not_modified.headers["X-Robots-Tag"] = "noindex, nofollow"
-        return not_modified
-    response = await call_next(request)
-    response.headers["X-Robots-Tag"] = "noindex, nofollow"
-    if etag:
-        response.headers["ETag"] = etag
-        response.headers["Cache-Control"] = _DATA_CACHE_CONTROL
-    return response
+app.add_middleware(NoindexCacheMiddleware)
 
 
 @app.exception_handler(MartUnavailableError)
