@@ -9,6 +9,7 @@ Composants :
 - `deploy/Caddyfile` — bloc `:8083` → `reverse_proxy localhost:8001` (importé par le Caddyfile global).
 - `solveille-swi.{service,timer}` — refresh SWI **mensuel** (`deploy/run-refresh.sh` = `make fetch-swi build-swi tiles`, sous `flock`).
 - `solveille-piezo.{service,timer}` — refresh IPS nappes **quotidien** (`deploy/run-refresh-piezo.sh` = `make fetch-piezo build-piezo tiles`, **flock partagé** avec le refresh SWI car tous deux écrivent marts/tuiles). Fetch Hub'eau **incrémental** (le 1er run, national, télécharge tout l'historique et peut être long ; les suivants ne récupèrent que l'incrément). Borné par `SOLVEILLE_DEPARTEMENTS` (vide = national).
+- `solveille-gaspar.{service,timer}` — refresh GASPAR **hebdomadaire** (calibration `H`, v2) : `deploy/run-refresh-gaspar.sh` = `make fetch-gaspar build-gaspar tiles`, **flock partagé**. `build-gaspar` recalcule `catnat_secheresse` + `commune_h` (réutilise le substrat `z_SWI` historique `commune_swi_hist`, reconstruit seulement au 1er run) + marts. ⚠️ Le refresh piézo quotidien **ne construit pas** `commune_h` (il le **relit** s'il existe) — la calibration `H` est (re)construite par les refreshs **SWI mensuel** et **GASPAR hebdo**.
 - CI/CD GitHub Actions (`.github/workflows/ci.yml`) : lint+types+tests, puis **déploiement SSH** sur push `main`.
 
 ## Bootstrap (une fois)
@@ -48,6 +49,11 @@ systemctl list-timers solveille-swi.timer
 cp deploy/systemd/solveille-piezo.{service,timer} /etc/systemd/system/
 systemctl daemon-reload && systemctl enable --now solveille-piezo.timer
 systemctl start solveille-piezo.service   # 1er run manuel (full national) — suivre les logs
+
+# Timer GASPAR hebdo (calibration H, v2) — 1er run construit catnat + commune_h + substrat
+cp deploy/systemd/solveille-gaspar.{service,timer} /etc/systemd/system/
+systemctl daemon-reload && systemctl enable --now solveille-gaspar.timer
+systemctl start solveille-gaspar.service  # 1er run manuel (peuple H) — suivre les logs
 systemctl list-timers 'solveille-*'
 ```
 
@@ -71,5 +77,8 @@ Site live : <https://argile.hectorb.fr>.
 
 Sur push `main` : la CI lance lint+types+tests, puis (si vert) le job `deploy` se connecte en SSH,
 fait `git reset --hard origin/main` + `uv sync --locked` + `systemctl restart solveille-api`
-(`deploy/server-deploy.sh`). **Le déploiement ne rebuild pas les données** — c'est le rôle du timer SWI.
-Un changement de schéma de mart nécessite un `deploy/run-refresh.sh` manuel après déploiement.
+(`deploy/server-deploy.sh`). **Le déploiement ne rebuild pas les données** — c'est le rôle des timers.
+Un changement de schéma de mart nécessite un refresh manuel après déploiement (l'API est **tolérante
+au schéma** → pas de 500 entre-temps, juste les nouvelles colonnes à NULL). Pour **peupler `H` (v2)**
+la 1re fois : `make fetch-gaspar` puis `systemctl start solveille-gaspar.service` (crée
+`catnat_secheresse` + `commune_swi_hist` + `commune_h` + marts + tuiles).

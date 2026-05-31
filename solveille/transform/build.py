@@ -1,11 +1,14 @@
 """Orchestrateur du DAG de transformation (raw → staging → marts).
 
-Idempotent : relancer recalcule les tables à partir du brut. Deux modes :
-- `python -m solveille.transform.build` (défaut) : DAG **complet** (v0 statique + v1 SWI).
-- `python -m solveille.transform.build swi` : **refresh SWI léger** (mensuel) — ne recalcule
-  que la dynamique (staging SWI → mart), en **réutilisant** le staging v0 (commune_rga, _stock,
-  _dvf…) et les poids spatiaux `commune_maille_poids` (statiques) → pas de re-fetch/recalcul
-  RGA/DVF (politesse réseau + rapidité). Cf. `deploy/run-refresh.sh`, `make build-swi`.
+Idempotent : relancer recalcule les tables à partir du brut. Modes :
+- `python -m solveille.transform.build` (défaut) : DAG **complet** (v0 statique + v1 SWI + v2 H).
+- `… build swi` : **refresh SWI léger** (mensuel) — ne recalcule que la dynamique (staging SWI →
+  catnat/H → mart), en **réutilisant** le staging v0 (commune_rga, _stock, _dvf…) et les poids
+  spatiaux `commune_maille_poids` (statiques). Cf. `deploy/run-refresh.sh`, `make build-swi`.
+- `… build piezo` : **refresh IPS léger** (quotidien) — piézo → `commune_ips` → mart (relit
+  `commune_h` s'il existe, ne le reconstruit pas). Cf. `deploy/run-refresh-piezo.sh`.
+- `… build gaspar` : **refresh GASPAR léger** (hebdo) — `catnat_secheresse` + `commune_h` (réutilise
+  `commune_swi_hist`) → mart. Cf. `deploy/run-refresh-gaspar.sh`, `make build-gaspar`.
 """
 
 from __future__ import annotations
@@ -119,6 +122,27 @@ def refresh_swi() -> None:
     log.info("build.refresh_swi.done")
 
 
+def refresh_gaspar() -> None:
+    """Refresh GASPAR **hebdomadaire** : recalcule `catnat_secheresse` + `commune_h` + marts.
+
+    Le brut GASPAR doit être rafraîchi avant (`make fetch-gaspar`). **Réutilise** le substrat
+    `z_SWI` historique (`commune_swi_hist`, qui ne dépend que du SWI mensuel) s'il existe — on
+    ne le reconstruit qu'au 1er run. Skip propre si le brut GASPAR est absent. À enchaîner avec
+    `make tiles` (les seuils de niveaux sont recalculés au rebuild du mart mensuel)."""
+    log.info("build.refresh_gaspar.start")
+    try:
+        staging.build_catnat_secheresse()
+    except FileNotFoundError as exc:
+        log.warning("build.refresh_gaspar.no_raw", reason=str(exc))  # pas de fetch-gaspar
+        return
+    if not (get_settings().staging_dir / "commune_swi_hist.parquet").exists():
+        h_calib.build_commune_swi_hist()  # 1er run / seed : substrat historique absent
+    h_calib.build_commune_h()
+    mart.build_commune_pression_mensuel()
+    mart.build_commune_pression()
+    log.info("build.refresh_gaspar.done")
+
+
 def refresh_piezo() -> None:
     """Refresh IPS léger (quotidien) : réutilise le staging v0 + SWI + climatologie SWI.
 
@@ -142,6 +166,8 @@ def main() -> None:
         refresh_swi()
     elif arg == "piezo":
         refresh_piezo()
+    elif arg == "gaspar":
+        refresh_gaspar()
     else:
         build_all()
 

@@ -1,0 +1,18 @@
+[Unit]
+Description=Solveille — rafraîchissement hebdomadaire GASPAR (calibration H : catnat + commune_h + mart + tuiles)
+Documentation=https://github.com/hectorbertucat/solveille
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=root
+Group=root
+Environment=SOLVEILLE_REPO=/opt/solveille
+Environment=SOLVEILLE_DATA_DIR=/opt/solveille/data
+WorkingDirectory=/opt/solveille
+ExecStart=/opt/solveille/deploy/run-refresh-gaspar.sh
+Nice=10
+# GASPAR = 1 GET conditionnel (~6 Mo) ; le refresh réutilise le substrat z_SWI historique
+# (reconstruit seulement au 1er run). Marge confortable pour le 1er run (substrat national).
+TimeoutStartSec=3600
