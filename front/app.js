@@ -24,6 +24,13 @@ const IPS_CONF_MAX = 1 / 3;
 function ipsClasseInfo(c) {
   return { label: IPS_CLASS_LABELS[c] || "—", bg: IPS_CLASS_BG[c] || GREY, fg: IPS_CLASS_FG[c] || "#1a1a2e" };
 }
+// Couleur de la pastille H (calibration sécheresse) : neutre quand bas, chaude quand élevé.
+function hChip(p) {
+  if (p >= 0.6) return { bg: "#d7301f", fg: "#fff" };
+  if (p >= 0.35) return { bg: "#fc8d59", fg: "#3a1500" };
+  if (p >= 0.15) return { bg: "#fdcc8a", fg: "#3a1500" };
+  return { bg: "#ece7e3", fg: "#5a544e" };
+}
 const FR_MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin",
                    "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 
@@ -288,6 +295,38 @@ async function renderFiche() {
       }));
       body.append(blk);
     }
+    // Calibration historique (H — Cat-Nat sécheresse). h_proba est gaté E>0 au mart.
+    if (f.h_proba != null) {
+      const pctH = Math.round(f.h_proba * 100);
+      const ch = hChip(f.h_proba);
+      const blk = elt("div", { class: "h-block" });
+      const headH = elt("div", { class: "h-head" });
+      headH.append(elt("span", { class: "k", text: "Calibration historique (sécheresse)" }));
+      const chip = elt("span", { class: "h-chip", text: pctH + " %" });
+      chip.style.background = ch.bg;
+      chip.style.color = ch.fg;
+      headH.append(chip);
+      blk.append(headH);
+      const ref = f.h_pool_level === "national" ? "(référence nationale)" : "dans le département";
+      blk.append(elt("div", {
+        class: "h-note",
+        text: "La sécheresse de ce mois correspond à " + pctH + " % des situations passées ayant "
+          + "conduit à une reconnaissance Cat-Nat sécheresse " + ref + ". Lecture indicative — "
+          + "pas une probabilité de reconnaissance (critères aussi administratifs).",
+      }));
+      const freq = f.catnat_freq || 0;
+      let hist;
+      if (freq > 0) {
+        const an = f.annees_reco || [];
+        const span = an.length ? " (" + an[0] + "→" + an[an.length - 1] + ")" : "";
+        hist = freq + " arrêté" + (freq > 1 ? "s" : "") + " sécheresse ici" + span
+          + (f.dernier_arrete ? ", dernier le " + f.dernier_arrete : "") + ".";
+      } else {
+        hist = "Aucun arrêté sécheresse recensé pour cette commune (GASPAR).";
+      }
+      blk.append(elt("div", { class: "h-hist", text: hist }));
+      body.append(blk);
+    }
     if (f.has_rga_coverage === false) {
       body.append(elt("div", {
         class: "note",
@@ -297,9 +336,10 @@ async function renderFiche() {
     body.append(elt("div", {
       class: "note",
       text: "Pression = exposition argile × sécheresse du moment (SWI sol, nowcast lissé 3 mois ; "
-        + "+ IPS nappes là où une station est représentative). Indice indicatif. Sources : "
-        + "Géorisques/BRGM, Météo-France (SWI), Hub'eau/ADES-BRGM (nappes), IGN, Insee, "
-        + "SDES/Fidéli, DGFiP/Etalab. Agrégats communaux (DVF).",
+        + "+ IPS nappes là où une station est représentative). Calibration historique vs arrêtés "
+        + "Cat-Nat sécheresse (GASPAR/DGPR). Indice indicatif. Sources : "
+        + "Géorisques/BRGM, GASPAR/DGPR, Météo-France (SWI), Hub'eau/ADES-BRGM (nappes), IGN, "
+        + "Insee, SDES/Fidéli, DGFiP/Etalab. Agrégats communaux (DVF).",
     }));
     slot.replaceWith(body);
     body.id = "fiche";
