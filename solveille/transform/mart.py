@@ -80,6 +80,10 @@ COPY (
     ml.ip_rga_score                    AS ip_rga_score,
     ml.ip_rga_niveau                   AS ip_rga_niveau,
     ml.t_latest                        AS T_latest,
+    ml.h_latest                        AS H_latest,
+    {catnat_freq}                      AS catnat_freq,
+    {dernier_arrete}                   AS dernier_arrete,
+    {annees_reco}                      AS annees_reco,
     {lu_admin_express}                 AS last_updated_admin_express,
     {lu_rga}                           AS last_updated_rga,
     {lu_bascule}                       AS last_updated_bascule,
@@ -87,14 +91,16 @@ COPY (
     {lu_fideli}                        AS last_updated_fideli,
     {lu_dvf}                           AS last_updated_dvf,
     {lu_swi}                           AS last_updated_swi,
-    {lu_ips}                           AS last_updated_ips
+    {lu_ips}                           AS last_updated_ips,
+    {lu_gaspar}                        AS last_updated_gaspar
   FROM read_parquet('{commune}') c
   LEFT JOIN read_parquet('{commune_rga}')     cr ON cr.code_insee = c.code_insee
   LEFT JOIN read_parquet('{commune_stock}')   cs ON cs.code_insee = c.code_insee
   LEFT JOIN read_parquet('{commune_dvf}')     cd ON cd.code_insee = c.code_insee
   LEFT JOIN read_parquet('{commune_bascule}') cb ON cb.code_insee = c.code_insee
+  {catnat_join}
   LEFT JOIN (
-    SELECT insee, date_mois, ip_rga_score, ip_rga_niveau, T AS t_latest
+    SELECT insee, date_mois, ip_rga_score, ip_rga_niveau, T AS t_latest, h_proba AS h_latest
     FROM read_parquet('{commune_mensuel}')
     WHERE date_mois = (SELECT max(date_mois) FROM read_parquet('{commune_mensuel}'))
   ) ml ON ml.insee = c.code_insee
@@ -109,6 +115,7 @@ COPY (
 _MENSUEL_BASE_SQL = """
 CREATE OR REPLACE TEMP TABLE _mensuel AS
 SELECT insee, date_mois, E, z_swi, dry_swi, z_ips, dry_ips, ips_nqt, w_ips,
+       h_proba, h_n_events, h_pool_level,
        CASE WHEN dry_ips IS NULL OR w_ips <= 0.0 THEN dry_swi
             ELSE (dry_swi + w_ips * dry_ips) / (1.0 + w_ips) END AS T,
        CAST(LEAST(GREATEST(round(100.0 * E * pow(
@@ -122,11 +129,15 @@ FROM (
          {ips_z}   AS z_ips,
          {ips_dry} AS dry_ips,
          {ips_nqt} AS ips_nqt,
-         {ips_w}   AS w_ips
+         {ips_w}   AS w_ips,
+         {h_proba}       AS h_proba,
+         {h_n_events}    AS h_n_events,
+         {h_pool_level}  AS h_pool_level
   FROM read_parquet('{commune_swi}') sw
   LEFT JOIN read_parquet('{commune_rga}')   cr ON cr.code_insee = sw.code_insee
   LEFT JOIN read_parquet('{commune_stock}') cs ON cs.code_insee = sw.code_insee
   {ips_join}
+  {h_join}
 )
 """
 
@@ -141,7 +152,10 @@ COPY (
          CASE WHEN E <= 0 THEN NULL {code_when} END AS ip_rga_niveau_code,
          CASE WHEN E <= 0 THEN NULL {label_when} END AS ip_rga_niveau,
          CASE WHEN w_ips <= 0.0 THEN 0.0 ELSE w_ips / (1.0 + w_ips) END AS confiance_t,
-         CASE WHEN ips_nqt IS NULL THEN NULL {classe_when} END AS ips_classe
+         CASE WHEN ips_nqt IS NULL THEN NULL {classe_when} END AS ips_classe,
+         CASE WHEN E <= 0 THEN NULL ELSE h_proba END      AS h_proba,
+         CASE WHEN E <= 0 THEN NULL ELSE h_n_events END    AS h_n_events,
+         CASE WHEN E <= 0 THEN NULL ELSE h_pool_level END  AS h_pool_level
   FROM _mensuel
 ) TO '{out}' (FORMAT PARQUET);
 """
@@ -190,6 +204,27 @@ def build_commune_pression_mensuel(
             "ips_w": "0.0",
         }
 
+    # Calibration H optionnelle : si `commune_h.parquet` est présent (GASPAR ingéré), on
+    # branche h_proba/h_n_events/h_pool_level ; sinon NULL (mart valide sans H — tolérance).
+    commune_h = stg / "commune_h.parquet"
+    if commune_h.exists():
+        h_frag = {
+            "h_join": (
+                f"LEFT JOIN read_parquet('{commune_h}') ch "
+                "ON ch.code_insee = sw.code_insee AND ch.date_mois = sw.date_mois"
+            ),
+            "h_proba": "ch.h_proba",
+            "h_n_events": "ch.h_n_events",
+            "h_pool_level": "ch.h_pool_level",
+        }
+    else:
+        h_frag = {
+            "h_join": "",
+            "h_proba": "CAST(NULL AS DOUBLE)",
+            "h_n_events": "CAST(NULL AS BIGINT)",
+            "h_pool_level": "CAST(NULL AS VARCHAR)",
+        }
+
     own = con is None
     con = con or duckdb_io.connect()
     try:
@@ -202,6 +237,7 @@ def build_commune_pression_mensuel(
                 commune_rga=stg / "commune_rga.parquet",
                 commune_stock=stg / "commune_stock.parquet",
                 **ips_frag,
+                **h_frag,
             )
         )
         raw = duckdb_io.scalar(
@@ -297,6 +333,24 @@ def build_commune_pression(
     mensuel = mensuel or (s.marts_dir / "commune_pression_mensuel.parquet")
     out.parent.mkdir(parents=True, exist_ok=True)
 
+    # Historique des arrêtés (GASPAR) optionnel : si `catnat_secheresse.parquet` est présent,
+    # on expose catnat_freq/dernier_arrete/annees_reco ; sinon NULL (mart valide sans GASPAR).
+    catnat = stg / "catnat_secheresse.parquet"
+    if catnat.exists():
+        catnat_frag = {
+            "catnat_join": f"LEFT JOIN read_parquet('{catnat}') cn ON cn.code_insee = c.code_insee",
+            "catnat_freq": "cn.catnat_freq",
+            "dernier_arrete": "cn.dernier_arrete",
+            "annees_reco": "cn.annees_reco",
+        }
+    else:
+        catnat_frag = {
+            "catnat_join": "",
+            "catnat_freq": "CAST(NULL AS BIGINT)",
+            "dernier_arrete": "CAST(NULL AS DATE)",
+            "annees_reco": "CAST(NULL AS INTEGER[])",
+        }
+
     sql = _SQL.format(
         e_expr=_E_EXPR.strip(),
         commune=stg / "commune.parquet",
@@ -314,6 +368,8 @@ def build_commune_pression(
         lu_dvf=_last_updated("dvf"),
         lu_swi=_last_updated("swi_catnat"),
         lu_ips=_last_updated("hubeau_piezo"),
+        lu_gaspar=_last_updated("gaspar"),
+        **catnat_frag,
     )
 
     own = con is None

@@ -116,3 +116,58 @@ def test_all_communes_present(mart: Path) -> None:
     con = duckdb_io.connect()
     n = con.execute(f"SELECT count(*) FROM read_parquet('{mart}')").fetchone()[0]
     assert n == 4
+
+
+# --- v2 : calibration H branchée au mart (commune_h + catnat_secheresse présents) ---------
+
+_TABLES_H = {
+    **_TABLES,
+    # H par commune×mois (E>0 : A,D exposées ; B aléa 0 ⇒ E=0 ⇒ H gaté NULL au mart).
+    "commune_h": """SELECT * FROM (VALUES
+        ('A', DATE '2024-08-01', 0.70::DOUBLE, 50::BIGINT, 'departement'),
+        ('B', DATE '2024-08-01', 0.40::DOUBLE, 50::BIGINT, 'departement'),
+        ('D', DATE '2024-08-01', 0.90::DOUBLE, 50::BIGINT, 'national')
+      ) t(code_insee, date_mois, h_proba, h_n_events, h_pool_level)""",
+    # Historique des arrêtés (le mart ne lit que catnat_freq/dernier_arrete/annees_reco).
+    "catnat_secheresse": """SELECT * FROM (VALUES
+        ('A', 3, DATE '2022-12-01', [2003, 2018, 2022]),
+        ('D', 1, DATE '2017-12-01', [2017])
+      ) t(code_insee, catnat_freq, dernier_arrete, annees_reco)""",
+}
+
+
+def _mensuel_static(tables: dict[str, str], tmp_path: Path) -> tuple[Path, Path]:
+    stg = tmp_path / "staging"
+    stg.mkdir(exist_ok=True)
+    with duckdb_io.connection() as con:
+        for name, sql in tables.items():
+            con.execute(f"COPY ({sql}) TO '{stg / (name + '.parquet')}' (FORMAT PARQUET)")
+    mensuel = tmp_path / "commune_pression_mensuel.parquet"
+    build_commune_pression_mensuel(staging_dir=stg, out=mensuel, seuils_out=tmp_path / "s.json")
+    static = tmp_path / "commune_pression.parquet"
+    build_commune_pression(staging_dir=stg, out=static, mensuel=mensuel)
+    return mensuel, static
+
+
+def test_mart_h_columns_and_gating(tmp_path: Path) -> None:
+    mensuel, static = _mensuel_static(_TABLES_H, tmp_path)
+    a_m = _row(mensuel, "A")
+    assert a_m["h_proba"] == pytest.approx(0.70)  # E>0 → H exposé
+    assert a_m["h_n_events"] == 50 and a_m["h_pool_level"] == "departement"
+    b_m = _row(mensuel, "B")
+    assert b_m["h_proba"] is None  # E=0 ⇒ H gaté NULL (comme ip_rga_niveau)
+    a_s = _row(static, "A")
+    assert a_s["H_latest"] == pytest.approx(0.70)  # dernier mois
+    assert a_s["catnat_freq"] == 3 and str(a_s["dernier_arrete"]) == "2022-12-01"
+    assert list(a_s["annees_reco"]) == [2003, 2018, 2022]
+    b_s = _row(static, "B")
+    assert b_s["H_latest"] is None and b_s["catnat_freq"] is None  # E=0 + pas d'arrêté
+
+
+def test_mart_h_absent_is_null(tmp_path: Path) -> None:
+    # commune_h / catnat_secheresse absents (GASPAR non ingéré) → mart valide, colonnes H NULL.
+    mensuel, static = _mensuel_static(_TABLES, tmp_path)
+    a_m = _row(mensuel, "A")
+    assert "h_proba" in a_m and a_m["h_proba"] is None  # colonne présente, valeur NULL
+    a_s = _row(static, "A")
+    assert a_s["H_latest"] is None and a_s["catnat_freq"] is None and a_s["annees_reco"] is None
