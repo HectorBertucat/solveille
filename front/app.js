@@ -35,9 +35,10 @@ const FR_MONTHS = ["janv.", "févr.", "mars", "avr.", "mai", "juin",
                    "juil.", "août", "sept.", "oct.", "nov.", "déc."];
 
 // Expression de couleur MapLibre pour l'attribut de niveau d'un mois (clé "n_AAAAMM").
+// Sans `coalesce` : le pivot écrit déjà 0 si NULL, et `match` retombe sur GREY pour 0/absent.
 function colorExpr(attrKey) {
   return [
-    "match", ["coalesce", ["get", attrKey], 0],
+    "match", ["get", attrKey],
     1, NIVEAU_COLORS[1], 2, NIVEAU_COLORS[2], 3, NIVEAU_COLORS[3],
     4, NIVEAU_COLORS[4], 5, NIVEAU_COLORS[5],
     GREY,
@@ -63,7 +64,8 @@ const map = new maplibregl.Map({
       { id: "carto", type: "raster", source: "carto", paint: { "raster-opacity": 0.55 } },
       {
         id: "communes-fill", type: "fill", source: "communes", "source-layer": SRC_LAYER,
-        paint: { "fill-color": GREY, "fill-opacity": 0.78 },
+        // Transition courte : lisse le saut de couleur d'un mois à l'autre (prev/next, play).
+        paint: { "fill-color": GREY, "fill-opacity": 0.78, "fill-color-transition": { duration: 120, delay: 0 } },
       },
       {
         id: "communes-line", type: "line", source: "communes", "source-layer": SRC_LAYER,
@@ -78,12 +80,14 @@ const map = new maplibregl.Map({
   },
   center: [2.4, 46.6],
   zoom: 4.6,
+  minZoom: 4, // tuiles z4→9 : sous z4 il n'y a pas de tuiles (évite une carte vide au dézoom)
   maxZoom: 12,
 });
 map.addControl(new maplibregl.NavigationControl(), "bottom-right");
 
 // --- État temporel (curseur de date) ---
 let MONTHS = []; // [{key:'202512', iso:'2025-12', y, m}]
+let EXPRS = []; // expressions de couleur MapLibre pré-compilées (1 par mois) — voir A3
 let idx = 0; // index du mois actif
 let openInsee = null; // commune dont la fiche est ouverte
 let lastSerie = null; // série de la commune ouverte (cache pour le sparkline)
@@ -107,21 +111,42 @@ const slider = document.getElementById("month");
 const monthLabel = document.getElementById("monthLabel");
 const legendMonth = document.getElementById("legendMonth");
 
-function applyMonth(i, { refreshPanel = false } = {}) {
-  if (!MONTHS.length) return;
+// Recolore la carte + met à jour les libellés pour le mois `i` (expression pré-compilée).
+function paintMonth(i) {
   idx = Math.max(0, Math.min(MONTHS.length - 1, i));
   const mo = MONTHS[idx];
   if (map.getLayer("communes-fill")) {
-    map.setPaintProperty("communes-fill", "fill-color", colorExpr("n_" + mo.key));
+    map.setPaintProperty("communes-fill", "fill-color", EXPRS[idx] || colorExpr("n_" + mo.key));
   }
   const lbl = monthLabelOf(mo);
   monthLabel.textContent = lbl;
   legendMonth.textContent = lbl;
   slider.value = String(idx);
+}
+
+// Throttle requestAnimationFrame : l'event `input` peut tirer plusieurs fois/frame, mais on ne
+// recolore qu'UNE fois par frame (le vrai levier de fluidité — voir A3). `pendingIdx` mémorise
+// la dernière valeur demandée pendant qu'une frame est en vol.
+let rafPending = false;
+let pendingIdx = null;
+function scheduleApply(i) {
+  pendingIdx = i;
+  if (rafPending) return;
+  rafPending = true;
+  requestAnimationFrame(() => {
+    rafPending = false;
+    if (pendingIdx != null) { paintMonth(pendingIdx); pendingIdx = null; }
+  });
+}
+
+function applyMonth(i, { refreshPanel = false } = {}) {
+  if (!MONTHS.length) return;
+  pendingIdx = null; // annule une recolorisation rAF en attente (on peint tout de suite)
+  paintMonth(i);
   if (refreshPanel && openInsee) renderFiche();
 }
 
-slider.addEventListener("input", () => applyMonth(+slider.value)); // carte en direct (léger)
+slider.addEventListener("input", () => scheduleApply(+slider.value)); // throttlé rAF (1 recolor/frame)
 slider.addEventListener("change", () => applyMonth(+slider.value, { refreshPanel: true }));
 document.getElementById("prevM").onclick = () => applyMonth(idx - 1, { refreshPanel: true });
 document.getElementById("nextM").onclick = () => applyMonth(idx + 1, { refreshPanel: true });
@@ -133,6 +158,7 @@ async function initTime() {
     if (md && md.min && md.max) MONTHS = monthsBetween(md.min, md.max);
   } catch (_) { /* /meta indisponible : curseur masqué */ }
   if (!MONTHS.length) { document.querySelector(".timebar").style.display = "none"; return; }
+  EXPRS = MONTHS.map((m) => colorExpr("n_" + m.key)); // pré-compile une fois (pas par tick)
   slider.min = "0";
   slider.max = String(MONTHS.length - 1);
   applyMonth(MONTHS.length - 1); // défaut : dernier mois
