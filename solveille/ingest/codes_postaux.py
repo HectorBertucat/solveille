@@ -6,12 +6,13 @@ data.gouv.fr (**Licence Ouverte 2.0**), résolu par l'API data.gouv (jeu
 lieu-dit `Ligne_5`) → la dédup (insee × cp) et l'agrégation `cp[]` par commune vivent dans
 `transform/build_search` (la zone brute reste immuable et complète).
 
-Schéma CSV (`;`, UTF-8) — **piège : l'en-tête est préfixée d'un `#`** :
+Schéma CSV (`;`, **Latin-1**, pas UTF-8) — **piège : l'en-tête est préfixée d'un `#`** :
 `#Code_commune_INSEE;Nom_de_la_commune;Code_postal;Libellé_d_acheminement;Ligne_5`.
 Clé commune = `Code_commune_INSEE` (**texte** : zéros de tête, Corse 2A/2B ; jamais `CAST int`).
-PLM : Paris `75056`→[75001..75020], Lyon `69123`, Marseille `13055` (pas de ligne par
-arrondissement) → la jointure sur l'INSEE COG de `commune.parquet` fonctionne directement.
-MAJ **semestrielle** → `last_updated_cp` = `last_modified` ressource. Cf. docs/data-sources.md §10.
+**PLM** : la base ne contient QUE les **arrondissements** (75101-75120 / 69381-69389 / 13201-13216),
+PAS le code COG commune (75056/69123/13055) → `transform/build_search` **roule** ces CP vers la
+commune parent (sinon Paris/Lyon/Marseille seraient sans CP). MAJ **semestrielle** →
+`last_updated_cp` = `last_modified` ressource. Cf. docs/data-sources.md §10.
 """
 
 from __future__ import annotations
@@ -64,7 +65,8 @@ def fetch() -> RawDataset:
         "resource_id": resource_id,
         "download_status": result.status,
         "licence": "Licence Ouverte 2.0 — La Poste (Base officielle des codes postaux)",
-        "note_format": "CSV ';' UTF-8 ; en-tête préfixée '#' ; 1 ligne = (INSEE × CP × Ligne_5).",
+        "note_format": "CSV ';' Latin-1 ; en-tête préfixée '#' ; 1 ligne = (INSEE × CP × Ligne_5) ;"
+        " PLM = arrondissements (rollup en aval).",
     }
     manifest = write_manifest(
         SOURCE,

@@ -253,10 +253,8 @@ function openPanel(props) {
     class: "dept",
     text: "Commune " + props.insee + (props.code_dept ? " · dépt " + props.code_dept : ""),
   }));
-  if (truthy(props.basculement_2026)) {
-    const b = elt("span", { class: "badge bascule", text: "Reclassée 2026" });
-    panel.append(b);
-  }
+  // Badge « Reclassée 2026 » : rendu dans renderFiche (données API authoritatives) → s'affiche
+  // aussi quand on ouvre une commune via la recherche (l'index ne porte pas le flag bascule).
   panel.append(elt("div", { class: "note", id: "fiche", text: "Chargement de la fiche…" }));
   panel.classList.add("open");
   renderFiche();
@@ -272,6 +270,11 @@ async function renderFiche() {
     if (!r.ok) throw new Error(String(r.status));
     const f = await r.json();
     const body = elt("div");
+
+    // Badge « Reclassée 2026 » (flag API, donc présent quel que soit le chemin d'ouverture).
+    if (truthy(f.basculement_2026)) {
+      body.append(elt("span", { class: "badge bascule", text: "Reclassée 2026" }));
+    }
 
     // Pastille de pression du mois sélectionné
     const ni = niveauInfo(f.ip_rga_niveau_code);
@@ -405,11 +408,11 @@ let activeIdx = -1;         // option survolée au clavier
 
 async function initSearch() {
   if (typeof MiniSearch === "undefined") return; // CDN indispo → recherche désactivée proprement
-  let idx;
-  try { idx = await (await fetch("communes-index.json")).json(); } catch (_) { return; }
-  CP_DATE = idx.last_updated_cp;
+  let indexData;
+  try { indexData = await (await fetch("communes-index.json")).json(); } catch (_) { return; }
+  CP_DATE = indexData.last_updated_cp;
   fillIntroDates();
-  const d = idx.data;
+  const d = indexData.data;
   DOCS = d.insee.map((insee, i) => ({
     id: insee, insee, nom: d.nom[i], dept: d.dept[i], bbox: d.bbox[i],
     cp: d.cp[i] || [], niveau: d.niveau ? d.niveau[i] : 0,
@@ -492,7 +495,9 @@ function moveActive(delta) {
   const items = suggestBox.querySelectorAll(".sg-item");
   if (!items.length) return;
   if (activeIdx >= 0) items[activeIdx].classList.remove("active");
-  activeIdx = (activeIdx + delta + items.length) % items.length;
+  // Depuis l'état initial (-1) : ↓ → premier, ↑ → dernier (sinon la formule sauterait le dernier).
+  activeIdx =
+    activeIdx < 0 ? (delta > 0 ? 0 : items.length - 1) : (activeIdx + delta + items.length) % items.length;
   const el = items[activeIdx];
   el.classList.add("active");
   qInput.setAttribute("aria-activedescendant", el.id);
@@ -550,14 +555,29 @@ function fillIntroDates() {
   }
   if (CP_DATE) setIntroDate("lu-cp", CP_DATE);
 }
-function openIntro() { introEl.hidden = false; }
+let introLastFocus = null;
+function openIntro() {
+  introLastFocus = document.activeElement; // pour restaurer le focus à la fermeture
+  introEl.hidden = false;
+  document.getElementById("introGo").focus(); // place le focus dans le dialogue
+}
 function closeIntro() {
   introEl.hidden = true;
   try { localStorage.setItem("solveille_intro_seen", "1"); } catch (_) { /* stockage indispo */ }
+  if (introLastFocus && introLastFocus.focus) introLastFocus.focus();
 }
 document.getElementById("aboutBtn").addEventListener("click", openIntro);
 document.getElementById("introGo").addEventListener("click", closeIntro);
 introEl.addEventListener("click", (e) => { if (e.target === introEl) closeIntro(); }); // clic backdrop
 document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !introEl.hidden) closeIntro(); });
+// Piège le focus dans le dialogue (aria-modal n'est pas suffisant à lui seul) : Tab/Shift-Tab cyclent.
+introEl.addEventListener("keydown", (e) => {
+  if (e.key !== "Tab") return;
+  const f = introEl.querySelectorAll('button, [href], input, [tabindex]:not([tabindex="-1"])');
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+});
 // 1er chargement : afficher l'intro une fois (puis mémorisée).
 try { if (!localStorage.getItem("solveille_intro_seen")) openIntro(); } catch (_) { openIntro(); }

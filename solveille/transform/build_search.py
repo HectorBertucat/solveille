@@ -87,6 +87,8 @@ def build_communes_index(
         cp_join = "LEFT JOIN cp_agg a ON a.code_insee = g.code_insee" if has_cp else ""
         cp_sel = "COALESCE(a.cp, []::VARCHAR[])" if has_cp else "[]::VARCHAR[]"
         # Niveau IP-RGA du **dernier mois** (= la carte par défaut) → pastille des suggestions.
+        # arg_max ignore les NULL : OK ici car E (donc niveau NULL si E<=0) est invariant dans le
+        # temps (joint sur insee seul) → une commune a tous ses mois NULL ou tous non-NULL.
         niv_cte = (
             f""", niv AS (
               SELECT insee, arg_max(ip_rga_niveau_code, date_mois) AS niveau
@@ -144,6 +146,8 @@ def build_communes_index(
     }
     out.write_text(json.dumps(payload, ensure_ascii=False, separators=(",", ":")), encoding="utf-8")
     n_cp = sum(1 for c in cp if c)
+    if has_cp and n_cp == 0:  # CP présent mais 0 rattaché ⇒ lecture cassée (format La Poste ?)
+        log.warning("search.cp_unmatched", hint="vérifier l'encodage/colonnes du CSV codes postaux")
     log.info("search.index", path=str(out), n=len(insee), n_avec_cp=n_cp, bytes=out.stat().st_size)
     return out
 
