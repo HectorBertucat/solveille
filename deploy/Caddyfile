@@ -15,4 +15,10 @@
 		-Server
 	}
 	# Note : l'en-tête noindex (garde-fou DVF) est posé par l'app FastAPI et traverse Caddy.
+
+	# App shell (index.html + app.js) en `no-cache` : Cloudflare/le navigateur **revalident
+	# via ETag** → un déploiement se propage immédiatement (sinon le défaut CDN de 4 h sert un
+	# front périmé). Les PMTiles/données restent cacheables (long TTL).
+	@appshell path / /index.html /app.js
+	header @appshell Cache-Control "no-cache"
 }
