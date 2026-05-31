@@ -31,6 +31,15 @@ SOURCE_INSEE = "insee_logement"
 SOURCE_FIDELI = "fideli_epci"
 #: Répertoire brut de la source SWI CatNat (humidité des sols mensuelle).
 SOURCE_SWI = "swi_catnat"
+#: Répertoire brut de la source GASPAR (arrêtés Cat-Nat, calibration `H`).
+SOURCE_GASPAR = "gaspar"
+
+#: Dérive le code département depuis un code INSEE commune (Corse 2A/2B, DROM 97x/98x).
+_DEPT_FROM_INSEE = (
+    "CASE WHEN substr(code_insee, 1, 2) IN ('2A', '2B') THEN substr(code_insee, 1, 2) "
+    "WHEN substr(code_insee, 1, 2) IN ('97', '98') THEN substr(code_insee, 1, 3) "
+    "ELSE substr(code_insee, 1, 2) END"
+)
 
 # Codes d'arrondissements municipaux (Paris/Lyon/Marseille) à exclure pour éviter le
 # double comptage avec la commune entière (75056 / 69123 / 13055).
@@ -582,5 +591,121 @@ def build_swi_anomalie(
         n_z_null=n_null,
         z_moyen=zmean,
         z_ecart_type=zstd,
+    )
+    return out
+
+
+def build_catnat_secheresse(
+    con: duckdb.DuckDBPyConnection | None = None,
+    *,
+    raw_csv: Path | None = None,
+    commune_parquet: Path | None = None,
+    out: Path | None = None,
+    departements: list[str] | None = None,
+) -> Path:
+    """Construit `data/staging/catnat_secheresse.parquet` : arrêtés Cat-Nat **sécheresse**
+    agrégés **par commune** (fréquence, premier/dernier arrêté, années, évènements).
+
+    Lit `catnat_gaspar.csv` (`;`, UTF-8, dates ISO), **filtre `lib_risque_jo='Sécheresse'`**
+    (insensible casse/accents par robustesse), **déduplique** (commune × arrêté) sur
+    `cod_nat_catnat` (un arrêté couvre N communes + correctifs), borne aux départements
+    configurés (dept dérivé de l'INSEE), et **trace** le taux de communes orphelines vs le
+    COG courant (`commune.parquet` ; millésimes COG distincts — cf. ADR-014). INSEE en
+    **texte** (zéros, Corse 2A/2B).
+
+    `catnat_gaspar.csv` ne liste que des **reconnaissances** (positifs) → substrat de
+    calibration de `H` (M-B), pas une probabilité de reconnaissance (cf. `docs/metric.md §H`).
+    """
+    s = get_settings()
+    raw_csv = raw_csv or (s.source_raw_dir(SOURCE_GASPAR) / "catnat_gaspar.csv")
+    if not raw_csv.exists():
+        raise FileNotFoundError("CSV GASPAR absent — lance d'abord `make fetch-gaspar`.")
+    commune_parquet = commune_parquet or (s.staging_dir / "commune.parquet")
+    out = out or (s.staging_dir / "catnat_secheresse.parquet")
+    out.parent.mkdir(parents=True, exist_ok=True)
+    deps = s.departements if departements is None else departements
+    dept_filter = ""
+    if deps:
+        lst = ", ".join(f"'{d}'" for d in deps)
+        dept_filter = f"WHERE ({_DEPT_FROM_INSEE}) IN ({lst})"
+
+    own = con is None
+    con = con or duckdb_io.connect()
+    try:
+        # Lecture unique du CSV → table temp (sécheresse seule, INSEE/dates typés). Le
+        # bornage département (sur `code_insee` dérivé) s'applique ensuite à l'agrégat.
+        con.execute(
+            f"""
+            CREATE OR REPLACE TEMP TABLE _catnat_src AS
+            SELECT cod_commune::VARCHAR                       AS code_insee,
+                   cod_nat_catnat::VARCHAR                    AS cod_nat_catnat,
+                   num_risque_jo::VARCHAR                     AS num_risque_jo,
+                   TRY_CAST(dat_deb AS TIMESTAMP)::DATE        AS dat_deb,
+                   TRY_CAST(dat_fin AS TIMESTAMP)::DATE        AS dat_fin,
+                   TRY_CAST(dat_pub_arrete AS TIMESTAMP)::DATE AS dat_pub_arrete
+            FROM read_csv('{raw_csv}', delim = ';', header = true, all_varchar = true)
+            WHERE lower(strip_accents(lib_risque_jo)) = 'secheresse';
+            """
+        )
+        con.execute(
+            f"""
+            COPY (
+              WITH dedup AS (   -- 1 ligne / (commune, arrêté) : arrêté multi-communes + correctifs
+                SELECT code_insee, cod_nat_catnat,
+                       min(dat_deb)        AS dat_deb,
+                       max(dat_fin)        AS dat_fin,
+                       max(dat_pub_arrete) AS dat_pub_arrete
+                FROM _catnat_src
+                {dept_filter}
+                GROUP BY code_insee, cod_nat_catnat
+              )
+              SELECT
+                code_insee,
+                count(*)            AS catnat_freq,
+                min(dat_pub_arrete) AS premier_arrete,
+                max(dat_pub_arrete) AS dernier_arrete,
+                list_sort(list_distinct(list(year(dat_pub_arrete)))) AS annees_reco,
+                list(struct_pack(
+                       cod_nat_catnat := cod_nat_catnat,
+                       dat_deb        := dat_deb,
+                       dat_fin        := dat_fin,
+                       annee          := year(dat_pub_arrete)))      AS evenements
+              FROM dedup
+              GROUP BY code_insee
+            ) TO '{out}' (FORMAT PARQUET);
+            """
+        )
+        stats = con.execute(
+            f"""SELECT count(*), sum(catnat_freq), min(premier_arrete), max(dernier_arrete)
+                FROM read_parquet('{out}')"""
+        ).fetchone()
+        n_comm, n_arretes, dmin, dmax = stats if stats else (0, None, None, None)
+        # Self-check : un seul `num_risque_jo` doit co-occurrer avec 'Sécheresse' (national).
+        n_codes = duckdb_io.scalar(con, "SELECT count(DISTINCT num_risque_jo) FROM _catnat_src")
+        # Anti-jointure COG : communes d'arrêtés absentes du COG courant (millésime).
+        n_orphelins = (
+            duckdb_io.scalar(
+                con,
+                f"""SELECT count(*) FROM read_parquet('{out}') a
+                    WHERE a.code_insee NOT IN (
+                      SELECT code_insee FROM read_parquet('{commune_parquet}'))""",
+            )
+            if commune_parquet.exists()
+            else None
+        )
+    finally:
+        if own:
+            con.close()
+    if n_codes is not None and n_codes != 1:
+        log.warning("staging.catnat_secheresse.num_risque_ambigu", n_codes=n_codes)
+    log.info(
+        "staging.catnat_secheresse",
+        path=str(out),
+        n_communes=n_comm,
+        n_arretes=n_arretes,
+        date_min=str(dmin),
+        date_max=str(dmax),
+        n_orphelins_cog=n_orphelins,
+        bornage=deps or "national",
     )
     return out

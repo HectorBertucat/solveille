@@ -50,6 +50,8 @@ def build_all() -> None:
     commune_swi.build_commune_swi()
     # v1.1 — IPS piézométrique (raffinement local de T) : optionnel (skip si pas de fetch-piezo)
     build_piezo_chain()
+    # v2 — GASPAR Cat-Nat sécheresse (substrat calibration H) : optionnel (skip sans fetch-gaspar)
+    build_catnat_chain()
     # marts : mensuel d'abord (fournit le dernier mois au statique)
     mart.build_commune_pression_mensuel()
     mart.build_commune_pression()
@@ -71,6 +73,18 @@ def build_piezo_chain() -> bool:
     return True
 
 
+def build_catnat_chain() -> bool:
+    """Staging GASPAR sécheresse → `catnat_secheresse` (substrat de calibration `H`).
+    **Optionnel** : si le brut GASPAR est absent (`make fetch-gaspar` non lancé), on **skip**
+    avec un avertissement — `H` sera simplement indisponible. Renvoie True si construit."""
+    try:
+        staging.build_catnat_secheresse()
+    except FileNotFoundError as exc:
+        log.warning("build.catnat_skip", reason=str(exc))  # H optionnel (calibration v2)
+        return False
+    return True
+
+
 def refresh_swi() -> None:
     """Refresh SWI léger (mensuel) : réutilise le staging v0 + `commune_maille_poids`.
 
@@ -85,6 +99,7 @@ def refresh_swi() -> None:
     if not (get_settings().staging_dir / "commune_maille_poids.parquet").exists():
         commune_swi.build_commune_maille_poids()  # 1er run / seed : poids spatiaux absents
     commune_swi.build_commune_swi()
+    build_catnat_chain()  # GASPAR sécheresse (optionnel) : recalcule l'agrégat par commune
     mart.build_commune_pression_mensuel()
     mart.build_commune_pression()
     log.info("build.refresh_swi.done")
