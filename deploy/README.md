@@ -95,11 +95,17 @@ manifest `front/assets.js`) et Caddy renvoie `Cache-Control: immutable` dessus. 
    `/communes-index.json` → **Eligible for cache**, **Edge TTL = Use cache-control header** (respecte
    l'origine), et **Cache Key = inclure la query string** (pour que `?v=` invalide proprement).
 2. **Tiered Cache** (Caching → Tiered Cache) : **activer** (gratuit) → moins de miss vers l'origine.
-3. Garder l'app-shell (`/`, `index.html`, `app.js`, `deck3d.js`, `basemap-layers.js`, `assets.js`)
-   **non caché agressivement** (Caddy = `no-cache`, revalidation ETag) ⇒ déploiements immédiats.
+3. **Browser Cache TTL = « Respect Existing Headers »** (Caching → Configuration) — ⚠️ **CRITIQUE** :
+   par défaut CF **réécrit** `Cache-Control` du front en `max-age=14400` (4 h) même quand l'origine
+   dit `no-cache` (constaté : `assets.js` repartait en `max-age=14400`). « Respect Existing Headers »
+   laisse passer le `no-cache` de Caddy sur l'app-shell (sinon un rebuild ne propage les nouveaux
+   hashs `?v=` qu'après 4 h pour les visiteurs revenants) ET l'`immutable` des assets.
+4. App-shell (`/`, `index.html`, `app.js`, `deck3d.js`, `basemap-layers.js`, `assets.js`) =
+   `no-cache` côté Caddy (revalidation ETag) ⇒ déploiements immédiats (dépend du point 3).
 Vérif : `curl -sI 'https://argile.hectorb.fr/tiles/communes.pmtiles?v=…'` → `cf-cache-status: HIT`
-au 2ᵉ appel + `Cache-Control: …immutable` + Range 206 (`-H 'Range: bytes=0-99'`). Le `X-Robots-Tag
-noindex` (garde-fou DVF, posé par FastAPI) doit toujours traverser.
+au 2ᵉ appel + `Cache-Control: …immutable` + Range 206 (`-H 'Range: bytes=0-99'`) ; `assets.js` →
+`Cache-Control: no-cache` (pas `max-age=14400`). Le `X-Robots-Tag noindex` (garde-fou DVF, posé par
+FastAPI) doit toujours traverser.
 
 ## CI/CD — secrets GitHub à définir
 
