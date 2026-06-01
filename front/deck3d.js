@@ -20,6 +20,7 @@ window.Deck3D = (() => {
   let active = false; // couche deck actuellement posée
   let wantActive = false; // intention (3D demandée) — gère un disable pendant le chargement
   let loadingPromise = null; // chargement deck UMD + data, une seule fois
+  let scriptInjected = false; // bundle UMD déjà injecté (évite de ré-injecter <script> sur retry)
   let DATA = null; // vues typées sur l'artefact binaire
   let palette = null; // [GREY, c1..c5] en [r,g,b], lus des tokens CSS
   let curMonth = 0;
@@ -52,7 +53,10 @@ window.Deck3D = (() => {
   function ensureLoaded() {
     if (loadingPromise) return loadingPromise;
     loadingPromise = (async () => {
-      await injectScript(DECK_SRC);
+      if (!scriptInjected) {
+        await injectScript(DECK_SRC); // un seul <script>, même si un fetch data échoue ensuite
+        scriptInjected = true;
+      }
       if (!window.deck || !window.deck.MapboxOverlay || !window.deck.SolidPolygonLayer) {
         throw new Error("deck.gl chargé mais MapboxOverlay/SolidPolygonLayer absents");
       }
@@ -157,12 +161,24 @@ window.Deck3D = (() => {
       wantActive = true;
       curMonth = idx;
       onReadyCb = onReady || null;
+      if (active) {
+        // Déjà actif (re-toggle rapide après chargement) : on repose juste + on notifie une fois.
+        _apply([makeLayer()]);
+        if (onReadyCb) {
+          onReadyCb();
+          onReadyCb = null;
+        }
+        return;
+      }
       ensureLoaded()
         .then(() => {
-          if (!wantActive) return; // 3D désactivée pendant le chargement
+          if (!wantActive || active) return; // désactivée pendant le chargement, ou déjà posée
           _apply([makeLayer()]);
           active = true;
-          if (onReadyCb) onReadyCb();
+          if (onReadyCb) {
+            onReadyCb();
+            onReadyCb = null; // ne pas re-déclencher via un enable concurrent
+          }
         })
         .catch(() => {
           /* repli : app.js garde la 3D fill-extrusion MapLibre */
@@ -177,14 +193,8 @@ window.Deck3D = (() => {
       curMonth = idx;
       if (active && overlay) _apply([makeLayer()]);
     },
-    /** Après un `setStyle` (thème) : MapLibre détruit la couche interleaved → on la repose. */
-    reapplyAfterStyle(idx) {
-      if (wantActive && DATA && overlay) {
-        curMonth = idx;
-        _apply([makeLayer()]);
-      }
-    },
-    /** Thème changé : recalcule la palette depuis les tokens CSS et rafraîchit la couche. */
+    /** Thème changé / setStyle : recalcule la palette (tokens CSS) et repose la couche interleaved
+     * (détruite par le setStyle), avec le bon `beforeId` du nouveau style. */
     refreshPalette() {
       if (DATA) buildPalette();
       if (active && overlay) _apply([makeLayer()]);
