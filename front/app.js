@@ -377,6 +377,62 @@ function sparkline(serie, activeIso, eventYears) {
   return wrap;
 }
 
+// Navigue le curseur de date vers un mois "AAAA-MM" (clic sur une case du calendrier de la fiche).
+function goToMonth(ym) {
+  const i = MONTHS.findIndex((m) => m.iso === ym);
+  if (i >= 0) { stopPlay(); applyMonth(i, { refreshPanel: true }); }
+}
+
+// Calendrier de pression (B-plot) : grille mois × année, case colorée par niveau (même rampe que la
+// carte) → la saisonnalité et les bandes de sécheresse (2022, 2017…) sautent aux yeux. Cliquer une
+// case déplace le curseur de date sur ce mois. Construction DOM namespacée (pas d'innerHTML).
+function pressionCalendar(serie, activeIso) {
+  const wrap = elt("div", { class: "cal" });
+  const byYM = {};
+  let yMin = Infinity, yMax = -Infinity;
+  for (const p of serie) {
+    const ym = p.date_mois.slice(0, 7);
+    byYM[ym] = p;
+    const y = +ym.slice(0, 4);
+    if (y < yMin) yMin = y;
+    if (y > yMax) yMax = y;
+  }
+  if (yMax < yMin) return wrap;
+  const activeYM = (activeIso || "").slice(0, 7);
+  const grid = elt("div", { class: "cal-grid" });
+  grid.append(elt("div", { class: "cal-corner" }));
+  for (let m = 0; m < 12; m++) {
+    grid.append(elt("div", { class: "cal-mh", text: FR_MONTHS[m][0].toUpperCase() }));
+  }
+  for (let y = yMin; y <= yMax; y++) {
+    grid.append(elt("div", { class: "cal-yh", text: String(y) }));
+    for (let m = 1; m <= 12; m++) {
+      const ym = y + "-" + String(m).padStart(2, "0");
+      const p = byYM[ym];
+      const cell = elt("div", { class: "cal-cell" });
+      if (!p) {
+        cell.classList.add("empty");
+      } else {
+        const code = p.ip_rga_niveau_code || 0;
+        cell.style.background = code ? NIVEAU_COLORS[code] : GREY;
+        const lvl = p.ip_rga_niveau || niveauInfo(code).label;
+        const sc = p.ip_rga_score == null ? "—" : p.ip_rga_score;
+        cell.title = FR_MONTHS[m - 1] + " " + y + " · " + lvl + " · " + sc;
+        if (ym === activeYM) cell.classList.add("active");
+        cell.setAttribute("role", "button");
+        cell.setAttribute("aria-label", cell.title);
+        cell.onclick = () => goToMonth(ym);
+      }
+      grid.append(cell);
+    }
+  }
+  wrap.append(grid);
+  wrap.append(elt("div", {
+    class: "cal-cap", text: "Calendrier de pression — chaque case = un mois ; cliquez pour y aller.",
+  }));
+  return wrap;
+}
+
 const panel = document.getElementById("panel");
 
 function openPanel(props) {
@@ -441,8 +497,12 @@ async function renderFiche() {
         lastSerie = (await (await fetch("/communes/" + encodeURIComponent(openInsee) + "/serie")).json()).serie;
       } catch (_) { lastSerie = []; }
     }
-    if (lastSerie && lastSerie.length > 1) {
+    // Sparkline + calendrier seulement si la commune a une vraie pression (≥1 mois niveau > 0) :
+    // une commune hors couverture RGA (E=0, ex. Paris) n'affiche ni courbe plate ni grille grise,
+    // le bandeau « hors couverture » + les KV suffisent.
+    if (lastSerie && lastSerie.length > 1 && lastSerie.some((p) => (p.ip_rga_niveau_code || 0) > 0)) {
       body.append(sparkline(lastSerie, mo ? mo.iso : "", f.annees_reco));
+      body.append(pressionCalendar(lastSerie, mo ? mo.iso : ""));
     }
 
     body.append(

@@ -110,6 +110,18 @@
     .spark { margin:12px 0 2px; }
     .spark svg { display:block; width:100%; height:48px; }
     .spark .axis { font-size:10px; color:var(--muted); display:flex; justify-content:space-between; font-family:var(--mono); }
+    /* Calendrier de pression (B-plot) : grille mois × année, clic = aller au mois */
+    .cal { margin:14px 0 2px; }
+    .cal-grid { display:grid; grid-template-columns:auto repeat(12, 1fr); gap:2px; align-items:center; }
+    .cal-mh, .cal-yh { font-size:9px; color:var(--muted); font-family:var(--mono); line-height:1; }
+    .cal-mh { text-align:center; padding-bottom:3px; }
+    .cal-yh { text-align:right; padding-right:5px; }
+    .cal-cell { aspect-ratio:1; border-radius:2px; background:var(--risk-0); }
+    .cal-cell.empty { background:transparent; }
+    .cal-cell:not(.empty) { cursor:pointer; }
+    .cal-cell:not(.empty):hover { outline:1.5px solid var(--ink); transform:scale(1.22); }
+    .cal-cell.active { outline:2px solid var(--ink); outline-offset:-1px; }
+    .cal-cap { font-size:10px; color:var(--muted); margin-top:6px; line-height:1.4; font-family:var(--mono); }
     .panel { position:absolute; right:0; top:56px; bottom:0; width:360px; z-index:3; background:var(--surface);
              border-left:1px solid var(--border); box-shadow:-4px 0 22px rgba(40,30,20,.10); padding:18px 22px; overflow:auto;
              transform:translateX(100%); transition:transform .22s ease; }
