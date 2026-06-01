@@ -30,13 +30,23 @@ if [ -z "${PMTILES}" ]; then
   if [ ! -x "${PMTILES}" ]; then
     os="$(uname -s)"; arch="$(uname -m)"
     case "${arch}" in x86_64|amd64) arch="x86_64";; arm64|aarch64) arch="arm64";; esac
-    asset="go-pmtiles-${GP_VERSION}_${os}_${arch}.zip"
-    url="https://github.com/protomaps/go-pmtiles/releases/download/v${GP_VERSION}/${asset}"
-    echo "Téléchargement go-pmtiles : ${url}"
-    curl -fsSL --max-time 180 -o .tools/gp.zip "${url}"
-    unzip -o .tools/gp.zip pmtiles -d .tools >/dev/null
+    # Naming des assets go-pmtiles INCOHÉRENT selon l'OS (vérifié sur la release) : Darwin =
+    # `go-pmtiles-<v>_Darwin_<arch>.zip` (tiret + zip) ; Linux/Windows = `go-pmtiles_<v>_<os>_<arch>.tar.gz`
+    # (underscore + tar.gz). On gère les deux, sinon 404 sur la VM Linux.
+    if [ "${os}" = "Darwin" ]; then
+      url="https://github.com/protomaps/go-pmtiles/releases/download/v${GP_VERSION}/go-pmtiles-${GP_VERSION}_Darwin_${arch}.zip"
+      echo "Téléchargement go-pmtiles : ${url}"
+      curl -fsSL --max-time 180 -o .tools/gp.zip "${url}"
+      unzip -o .tools/gp.zip pmtiles -d .tools >/dev/null
+      rm -f .tools/gp.zip
+    else
+      url="https://github.com/protomaps/go-pmtiles/releases/download/v${GP_VERSION}/go-pmtiles_${GP_VERSION}_${os}_${arch}.tar.gz"
+      echo "Téléchargement go-pmtiles : ${url}"
+      curl -fsSL --max-time 180 -o .tools/gp.tgz "${url}"
+      tar -xzf .tools/gp.tgz -C .tools pmtiles
+      rm -f .tools/gp.tgz
+    fi
     chmod +x "${PMTILES}"
-    rm -f .tools/gp.zip
   fi
 fi
 echo "go-pmtiles : $("${PMTILES}" version)"
