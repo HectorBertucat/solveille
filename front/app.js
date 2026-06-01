@@ -174,7 +174,9 @@ let HIST = {}; // histogramme mensuel des niveaux {AAAAMM:[n1..n5]} → compteur
 let is3D = false; // vue 3D (fill-extrusion) active ?
 let idx = 0; // index du mois actif
 let openInsee = null; // commune dont la fiche est ouverte
+let openNom = null; // nom de la commune ouverte (libellé du comparateur)
 let lastSerie = null; // série de la commune ouverte (cache pour le sparkline)
+let compareSet = []; // [{insee, nom, serie}] communes épinglées (comparateur B-plot) ; persiste
 
 const monthLabelOf = (mo) => FR_MONTHS[mo.m - 1] + " " + mo.y;
 
@@ -433,10 +435,130 @@ function pressionCalendar(serie, activeIso) {
   return wrap;
 }
 
+// --- Comparateur de communes (B-plot) : épingle jusqu'à 4 communes et superpose leurs trajectoires
+// de score (108 mois). Palette catégorielle (≠ rampe de pression), lisible en clair comme en sombre.
+const CMP_COLORS = ["#0e7c86", "#b45309", "#6d28d9", "#be123c"];
+const CMP_MAX = 4;
+const cmpColor = (i) => CMP_COLORS[i % CMP_COLORS.length];
+
+async function addToCompare(insee, nom) {
+  if (!insee || compareSet.length >= CMP_MAX || compareSet.some((c) => c.insee === insee)) return;
+  // Réutilise la série déjà chargée si c'est la commune ouverte, sinon un /serie (mis en cache).
+  let serie = insee === openInsee && lastSerie ? lastSerie : null;
+  if (!serie) {
+    try {
+      serie = (await (await fetch("/communes/" + encodeURIComponent(insee) + "/serie")).json()).serie;
+    } catch (_) { serie = []; }
+  }
+  compareSet.push({ insee, nom: nom || insee, serie: serie || [] });
+  renderFiche();
+}
+function removeFromCompare(insee) {
+  compareSet = compareSet.filter((c) => c.insee !== insee);
+  renderFiche();
+}
+
+// Graphe multi-lignes (SVG no-dep) : axe x = les 108 mois (référence MONTHS), y = score 0-100,
+// repères 0/50/100, guide verticale du mois actif, 1 polyline colorée par commune (ouverte = épaisse).
+function compareChart() {
+  const wrap = elt("div", { class: "cmp-chart" });
+  if (!compareSet.length || MONTHS.length < 2) return wrap;
+  const n = MONTHS.length;
+  const W = 316, H = 104, padL = 20, padR = 5, padT = 6, padB = 4;
+  const x = (i) => padL + (i * (W - padL - padR)) / (n - 1);
+  const y = (s) => H - padB - (Math.max(0, Math.min(100, s)) / 100) * (H - padT - padB);
+  const svg = document.createElementNS(SVGNS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "cmp-svg");
+  const hair = cssVar("--hairline") || "rgba(0,0,0,.1)";
+  const muted = cssVar("--muted") || "#999";
+  for (const g of [0, 50, 100]) {
+    const gy = y(g);
+    const ln = document.createElementNS(SVGNS, "line");
+    ln.setAttribute("x1", String(padL)); ln.setAttribute("x2", String(W - padR));
+    ln.setAttribute("y1", String(gy)); ln.setAttribute("y2", String(gy));
+    ln.setAttribute("stroke", hair); ln.setAttribute("stroke-width", "1");
+    svg.appendChild(ln);
+    const t = document.createElementNS(SVGNS, "text");
+    t.setAttribute("x", "0"); t.setAttribute("y", String(gy + 3));
+    t.setAttribute("font-size", "8"); t.setAttribute("fill", muted);
+    t.textContent = String(g);
+    svg.appendChild(t);
+  }
+  // Guide verticale du mois actif (le même que le curseur de date).
+  const ax = x(idx);
+  const guide = document.createElementNS(SVGNS, "line");
+  guide.setAttribute("x1", String(ax)); guide.setAttribute("x2", String(ax));
+  guide.setAttribute("y1", String(padT)); guide.setAttribute("y2", String(H - padB));
+  guide.setAttribute("stroke", cssVar("--ink") || "#333"); guide.setAttribute("stroke-width", "0.8");
+  guide.setAttribute("stroke-dasharray", "2 2"); guide.setAttribute("opacity", "0.35");
+  svg.appendChild(guide);
+  compareSet.forEach((c, ci) => {
+    const byYM = {};
+    for (const p of c.serie) if (p.ip_rga_score != null) byYM[p.date_mois.slice(0, 7)] = p.ip_rga_score;
+    const pts = [];
+    MONTHS.forEach((m, i) => { const s = byYM[m.iso]; if (s != null) pts.push(x(i) + "," + y(s)); });
+    if (pts.length < 2) return;
+    const pl = document.createElementNS(SVGNS, "polyline");
+    pl.setAttribute("fill", "none");
+    pl.setAttribute("stroke", cmpColor(ci));
+    pl.setAttribute("stroke-width", c.insee === openInsee ? "2" : "1.3");
+    pl.setAttribute("stroke-linejoin", "round");
+    if (c.insee !== openInsee) pl.setAttribute("opacity", "0.85");
+    pl.setAttribute("points", pts.join(" "));
+    svg.appendChild(pl);
+  });
+  wrap.appendChild(svg);
+  return wrap;
+}
+
+// Section « Comparateur » de la fiche : bouton épingler/retirer + graphe + légende (puces × supprimer).
+function compareSection() {
+  const sec = elt("div", { class: "cmp" });
+  sec.append(elt("span", { class: "k", text: "Comparateur de communes" }));
+  const inSet = compareSet.some((c) => c.insee === openInsee);
+  const btn = elt("button", { class: "cmp-add" });
+  if (inSet) {
+    btn.textContent = "− Retirer du comparateur";
+    btn.onclick = () => removeFromCompare(openInsee);
+  } else if (compareSet.length >= CMP_MAX) {
+    btn.textContent = "Comparateur plein (" + CMP_MAX + ")";
+    btn.disabled = true;
+  } else {
+    btn.textContent = "+ Comparer cette commune";
+    btn.onclick = () => addToCompare(openInsee, openNom);
+  }
+  sec.append(btn);
+  if (compareSet.length) {
+    sec.append(compareChart());
+    const leg = elt("div", { class: "cmp-legend" });
+    compareSet.forEach((c, i) => {
+      const chip = elt("span", { class: "cmp-chip" });
+      const dot = elt("span", { class: "cmp-dot" });
+      dot.style.background = cmpColor(i);
+      chip.append(dot, elt("span", { class: "cmp-name", text: c.nom }));
+      const rm = elt("button", { class: "cmp-x", text: "×" });
+      rm.setAttribute("aria-label", "Retirer " + c.nom);
+      rm.onclick = () => removeFromCompare(c.insee);
+      chip.append(rm);
+      leg.append(chip);
+    });
+    sec.append(leg);
+  } else {
+    sec.append(elt("div", {
+      class: "cmp-hint",
+      text: "Épinglez des communes pour superposer leurs trajectoires de pression (jusqu'à "
+        + CMP_MAX + "). La sélection vous suit de fiche en fiche.",
+    }));
+  }
+  return sec;
+}
+
 const panel = document.getElementById("panel");
 
 function openPanel(props) {
   openInsee = props.insee;
+  openNom = props.nom || props.insee;
   lastSerie = null;
   panel.replaceChildren();
 
@@ -570,6 +692,8 @@ async function renderFiche() {
       blk.append(elt("div", { class: "h-hist", text: hist }));
       body.append(blk);
     }
+    // Comparateur de communes (B-plot) : superpose les trajectoires des communes épinglées.
+    body.append(compareSection());
     if (f.has_rga_coverage === false) {
       body.append(elt("div", {
         class: "note",
@@ -819,6 +943,9 @@ function applyTheme(theme) {
   // le style, puis on ré-applique l'état dès que le nouveau style est parsé (couches recréées).
   map.setStyle(buildStyle(theme));
   map.once("styledata", applyViewState);
+  // Les SVG de la fiche (sparkline, comparateur) figent leurs couleurs d'axe au rendu (cssVar) →
+  // on re-rend la fiche ouverte pour qu'ils suivent le thème (séries en cache, pas de refetch lourd).
+  if (openInsee) renderFiche();
 }
 document.getElementById("themeBtn").addEventListener("click", () => {
   applyTheme(themeNow() === "dark" ? "light" : "dark");
