@@ -85,6 +85,22 @@ de la VM (celui qui sert déjà `fittrack.hectorb.fr`, connecteur *HEALTHY* = `c
 connecteur sur la VM → **Error 1033**). Service = **HTTP** (Caddy sert en clair sur `:8083`), pas HTTPS.
 Site live : <https://argile.hectorb.fr>.
 
+### Cloudflare — edge-cache des gros assets (B-perf, action manuelle dashboard)
+Les PMTiles/binaires étaient servis `cf-cache-status: DYNAMIC` (re-téléchargés depuis l'origine à
+chaque visite = egress). Le front versionne désormais ces assets par hash de contenu (`?v=<hash>`,
+manifest `front/assets.js`) et Caddy renvoie `Cache-Control: immutable` dessus. Pour que Cloudflare
+**cache au edge** (sinon ces réglages restent inertes) :
+1. **Cache Rule** (Caching → Cache Rules) : si
+   `URI Path` *ends with* `.pmtiles` **OU** *starts with* `/tiles/communes-3d` **OU** *equals*
+   `/communes-index.json` → **Eligible for cache**, **Edge TTL = Use cache-control header** (respecte
+   l'origine), et **Cache Key = inclure la query string** (pour que `?v=` invalide proprement).
+2. **Tiered Cache** (Caching → Tiered Cache) : **activer** (gratuit) → moins de miss vers l'origine.
+3. Garder l'app-shell (`/`, `index.html`, `app.js`, `deck3d.js`, `basemap-layers.js`, `assets.js`)
+   **non caché agressivement** (Caddy = `no-cache`, revalidation ETag) ⇒ déploiements immédiats.
+Vérif : `curl -sI 'https://argile.hectorb.fr/tiles/communes.pmtiles?v=…'` → `cf-cache-status: HIT`
+au 2ᵉ appel + `Cache-Control: …immutable` + Range 206 (`-H 'Range: bytes=0-99'`). Le `X-Robots-Tag
+noindex` (garde-fou DVF, posé par FastAPI) doit toujours traverser.
+
 ## CI/CD — secrets GitHub à définir
 
 `Settings → Secrets and variables → Actions` (ou via `gh secret set`) :

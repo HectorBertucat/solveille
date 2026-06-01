@@ -6,7 +6,16 @@
 const protocol = new pmtiles.Protocol();
 maplibregl.addProtocol("pmtiles", protocol.tile);
 
-const PMTILES_URL = "pmtiles://" + location.origin + "/tiles/communes.pmtiles";
+// Chemin d'un asset versionné par hash de contenu (B-perf) : `?v=<hash>` (depuis assets.js) → clé de
+// cache CDN distincte par version + `Cache-Control: immutable` ⇒ edge-cache + cache-bust au rebuild.
+// Repli sans `?v=` si le manifest est absent (ex. `make api` sans `make assets`).
+function assetPath(name) {
+  const dir = name === "communes-index.json" ? "/" : "/tiles/";
+  const v = (window.SOLVEILLE_ASSETS || {})[name];
+  return dir + name + (v ? "?v=" + v : "");
+}
+
+const PMTILES_URL = "pmtiles://" + location.origin + assetPath("communes.pmtiles");
 const SRC_LAYER = "communes";
 
 // Palette des 5 niveaux : **lue depuis les tokens CSS** (--risk-0..5) → source unique UI+carte (B3).
@@ -90,7 +99,7 @@ const themeNow = () => (document.documentElement.dataset.theme === "dark" ? "dar
 // basemap (villes, départements, eaux) passent AU-DESSUS du choroplèthe (insérés sous la 1ʳᵉ
 // couche `symbol`) → lecture pro, type Datawrapper/FT. Tuiles Protomaps + glyphs Noto Sans, 100 %
 // servis depuis notre origine (0 CDN runtime) : `/tiles/france.pmtiles` + `/glyphs/…`. ---
-const BASEMAP_PMTILES = "pmtiles://" + location.origin + "/tiles/france.pmtiles";
+const BASEMAP_PMTILES = "pmtiles://" + location.origin + assetPath("france.pmtiles");
 const GLYPHS_URL = location.origin + "/glyphs/{fontstack}/{range}.pbf";
 const BASEMAP_ATTRIB =
   "© OpenStreetMap (ODbL), Protomaps — RGA: Géorisques/BRGM · SWI: Météo-France · " +
@@ -764,7 +773,7 @@ let activeIdx = -1;         // option survolée au clavier
 async function initSearch() {
   if (typeof MiniSearch === "undefined") return; // CDN indispo → recherche désactivée proprement
   let indexData;
-  try { indexData = await (await fetch("communes-index.json")).json(); } catch (_) { return; }
+  try { indexData = await (await fetch(assetPath("communes-index.json"))).json(); } catch (_) { return; }
   CP_DATE = indexData.last_updated_cp;
   HIST = indexData.hist || {};
   fillIntroDates();

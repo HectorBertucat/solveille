@@ -3,7 +3,7 @@
 # Ce fichier est un CONTRAT d'interface : Claude Code implémente les modules derrière.
 
 .PHONY: setup lint test fetch-all fetch-v0 build build-swi build-piezo build-gaspar tiles search glyphs basemap api clean \
-        vendor-deck 3d-data \
+        vendor-deck 3d-data assets \
         fetch-communes fetch-rga fetch-bascule fetch-insee \
         fetch-swi fetch-piezo fetch-gaspar fetch-dvf fetch-fideli fetch-cp
 
@@ -48,16 +48,20 @@ build-piezo:  ## refresh IPS léger (quotidien) : piézo + mart (réutilise stag
 build-gaspar: ## refresh GASPAR léger (hebdo) : catnat + H + mart (réutilise commune_swi_hist)
 	uv run python -m solveille.transform.build gaspar
 
-tiles: glyphs vendor-deck ## PMTiles communes (tippecanoe) + index recherche + données 3D (glyphs/deck en prérequis)
+tiles: glyphs vendor-deck ## PMTiles communes (tippecanoe) + index recherche + données 3D + manifest assets
 	uv run python -m solveille.transform.tiles
 	uv run python -m solveille.transform.build_search
 	uv run python -m solveille.transform.build_3d_geometry
+	uv run python -m solveille.transform.build_assets
 
 search:       ## (re)génère uniquement l'index de recherche communal (front/communes-index.json)
 	uv run python -m solveille.transform.build_search
 
 3d-data:      ## précompute la géométrie 3D + matrice des scores → tiles/out/communes-3d.{bin,json}
 	uv run python -m solveille.transform.build_3d_geometry
+
+assets:       ## (re)génère le manifest de cache (hash de contenu → ?v=) → front/assets.js
+	uv run python -m solveille.transform.build_assets
 
 vendor-deck:  ## télécharge le bundle deck.gl UMD self-hosté → front/vendor/ (idempotent, pinné)
 	@test -f $(DECK_VENDOR) || ( mkdir -p front/vendor && \

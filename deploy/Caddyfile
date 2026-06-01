@@ -19,11 +19,17 @@
 	}
 	# Note : l'en-tête noindex (garde-fou DVF) est posé par l'app FastAPI et traverse Caddy.
 
-	# App shell (index.html + app.js + couches du basemap) en `no-cache` : Cloudflare/le navigateur
-	# **revalident via ETag** → un déploiement se propage immédiatement (sinon le défaut CDN de 4 h
-	# sert un front périmé). Les PMTiles/données restent cacheables (long TTL).
-	@appshell path / /index.html /app.js /basemap-layers.js /communes-index.json
+	# App shell (HTML + JS de l'app, dont le manifest de cache `assets.js`) en `no-cache` : Cloudflare/
+	# le navigateur **revalident via ETag** → un déploiement se propage immédiatement (sinon le défaut
+	# CDN de 4 h sert un front périmé). `assets.js` porte les nouveaux hashs ⇒ doit rester no-cache.
+	@appshell path / /index.html /app.js /basemap-layers.js /deck3d.js /assets.js
 	header @appshell Cache-Control "no-cache"
+
+	# Données versionnées par hash de contenu (`?v=` côté front, B-perf) → IMMUTABLE long TTL : CF
+	# cache au edge (avec une Cache Rule « eligible + clé incluant la query »), un rebuild change le
+	# hash ⇒ cache-bust propre. Caddy matche le PATH (ignore `?v=`). Couvre les 2 PMTiles + 3D + index.
+	@assets path *.pmtiles /tiles/communes-3d.* /communes-index.json
+	header @assets Cache-Control "public, max-age=31536000, immutable"
 
 	# Glyphs PBF du fond vectoriel : immuables (Noto Sans figés) → cache long, gain d'egress.
 	@glyphs path /glyphs/*

@@ -11,8 +11,11 @@
 
 window.Deck3D = (() => {
   const DECK_SRC = "vendor/deck.gl-9.3.2.min.js";
-  const JSON_URL = location.origin + "/tiles/communes-3d.json";
-  const BIN_URL = location.origin + "/tiles/communes-3d.bin";
+  // Versionne par hash de contenu (B-perf, `?v=` depuis assets.js chargé avant) → edge-cache CDN.
+  const v3 = (window.SOLVEILLE_ASSETS || {});
+  const ver = (n) => (v3[n] ? "?v=" + v3[n] : "");
+  const JSON_URL = location.origin + "/tiles/communes-3d.json" + ver("communes-3d.json");
+  const BIN_URL = location.origin + "/tiles/communes-3d.bin" + ver("communes-3d.bin");
   const LAYER_ID = "communes-3d-gpu";
 
   let map = null;

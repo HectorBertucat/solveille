@@ -5,6 +5,8 @@ data/
 tiles/out/
 # Index de recherche communal : artefact généré (make tiles/search), servi depuis front/ sur la VM.
 front/communes-index.json
+# Manifest de cache (hash de contenu des assets → ?v=) : généré par make tiles/assets, no-cache.
+front/assets.js
 # Glyphs PBF du fond vectoriel : artefact binaire ~13 Mo (make glyphs), couverture Noto Sans complète.
 front/glyphs/
 # Bundle deck.gl UMD self-hosté (make vendor-deck) — vendored ~1,5 Mo, non versionné (re-téléchargé sur la VM).
