@@ -120,6 +120,7 @@
     .cal-cell.empty { background:transparent; }
     .cal-cell:not(.empty) { cursor:pointer; }
     .cal-cell:not(.empty):hover { outline:1.5px solid var(--ink); transform:scale(1.22); }
+    .cal-cell:not(.empty):focus-visible { outline:2px solid var(--accent); outline-offset:1px; }
     .cal-cell.active { outline:2px solid var(--ink); outline-offset:-1px; }
     .cal-cap { font-size:10px; color:var(--muted); margin-top:6px; line-height:1.4; font-family:var(--mono); }
     /* Comparateur de communes (B-plot) : superpose les trajectoires de pression */

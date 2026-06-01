@@ -422,8 +422,12 @@ function pressionCalendar(serie, activeIso) {
         cell.title = FR_MONTHS[m - 1] + " " + y + " · " + lvl + " · " + sc;
         if (ym === activeYM) cell.classList.add("active");
         cell.setAttribute("role", "button");
+        cell.setAttribute("tabindex", "0");
         cell.setAttribute("aria-label", cell.title);
         cell.onclick = () => goToMonth(ym);
+        cell.onkeydown = (e) => {
+          if (e.key === "Enter" || e.key === " ") { e.preventDefault(); goToMonth(ym); }
+        };
       }
       grid.append(cell);
     }
@@ -450,7 +454,11 @@ async function addToCompare(insee, nom) {
       serie = (await (await fetch("/communes/" + encodeURIComponent(insee) + "/serie")).json()).serie;
     } catch (_) { serie = []; }
   }
-  compareSet.push({ insee, nom: nom || insee, serie: serie || [] });
+  // Indice de couleur STABLE (le plus petit libre) → retirer une commune ne recolore pas les autres.
+  const used = new Set(compareSet.map((c) => c.ci));
+  let ci = 0;
+  while (used.has(ci)) ci++;
+  compareSet.push({ insee, nom: nom || insee, serie: serie || [], ci });
   renderFiche();
 }
 function removeFromCompare(insee) {
@@ -493,21 +501,31 @@ function compareChart() {
   guide.setAttribute("stroke", cssVar("--ink") || "#333"); guide.setAttribute("stroke-width", "0.8");
   guide.setAttribute("stroke-dasharray", "2 2"); guide.setAttribute("opacity", "0.35");
   svg.appendChild(guide);
-  compareSet.forEach((c, ci) => {
+  for (const c of compareSet) {
     const byYM = {};
     for (const p of c.serie) if (p.ip_rga_score != null) byYM[p.date_mois.slice(0, 7)] = p.ip_rga_score;
-    const pts = [];
-    MONTHS.forEach((m, i) => { const s = byYM[m.iso]; if (s != null) pts.push(x(i) + "," + y(s)); });
-    if (pts.length < 2) return;
-    const pl = document.createElementNS(SVGNS, "polyline");
-    pl.setAttribute("fill", "none");
-    pl.setAttribute("stroke", cmpColor(ci));
-    pl.setAttribute("stroke-width", c.insee === openInsee ? "2" : "1.3");
-    pl.setAttribute("stroke-linejoin", "round");
-    if (c.insee !== openInsee) pl.setAttribute("opacity", "0.85");
-    pl.setAttribute("points", pts.join(" "));
-    svg.appendChild(pl);
-  });
+    // Découpe en segments contigus : pas de trait droit trompeur par-dessus un trou de données.
+    const runs = [];
+    let run = null;
+    MONTHS.forEach((m, i) => {
+      const s = byYM[m.iso];
+      if (s == null) { run = null; return; }
+      if (!run) { run = []; runs.push(run); }
+      run.push(x(i) + "," + y(s));
+    });
+    const thick = c.insee === openInsee;
+    for (const pts of runs) {
+      if (pts.length < 2) continue;
+      const pl = document.createElementNS(SVGNS, "polyline");
+      pl.setAttribute("fill", "none");
+      pl.setAttribute("stroke", cmpColor(c.ci));
+      pl.setAttribute("stroke-width", thick ? "2" : "1.3");
+      pl.setAttribute("stroke-linejoin", "round");
+      if (!thick) pl.setAttribute("opacity", "0.85");
+      pl.setAttribute("points", pts.join(" "));
+      svg.appendChild(pl);
+    }
+  }
   wrap.appendChild(svg);
   return wrap;
 }
@@ -532,10 +550,10 @@ function compareSection() {
   if (compareSet.length) {
     sec.append(compareChart());
     const leg = elt("div", { class: "cmp-legend" });
-    compareSet.forEach((c, i) => {
+    compareSet.forEach((c) => {
       const chip = elt("span", { class: "cmp-chip" });
       const dot = elt("span", { class: "cmp-dot" });
-      dot.style.background = cmpColor(i);
+      dot.style.background = cmpColor(c.ci);
       chip.append(dot, elt("span", { class: "cmp-name", text: c.nom }));
       const rm = elt("button", { class: "cmp-x", text: "×" });
       rm.setAttribute("aria-label", "Retirer " + c.nom);
