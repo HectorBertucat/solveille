@@ -162,6 +162,8 @@ const map = new maplibregl.Map({
   maxZoom: 12,
 });
 map.addControl(new maplibregl.NavigationControl(), "bottom-right");
+// 3D animée GPU (deck.gl) : module chargé paresseusement, repli sur la 3D MapLibre si indispo.
+if (window.Deck3D) Deck3D.init(map);
 
 // --- État temporel (curseur de date) ---
 let MONTHS = []; // [{key:'202512', iso:'2025-12', y, m}]
@@ -225,6 +227,7 @@ function paintMonth(i) {
     map.setPaintProperty("communes-3d", "fill-extrusion-color", expr); // couleur selon le mode
     map.setPaintProperty("communes-3d", "fill-extrusion-height", heightExpr("n_" + mo.key)); // relief = niveau
   }
+  if (is3D && window.Deck3D) Deck3D.setMonth(idx); // morph GPU couleur+hauteur (si deck actif)
   const lbl = monthLabelOf(mo);
   monthLabel.textContent = lbl;
   legendMonth.textContent = lbl;
@@ -947,6 +950,11 @@ function applyViewState() {
     map.setLayoutProperty("communes-fill", "visibility", is3D ? "none" : "visible");
   }
   if (MONTHS.length) paintMonth(idx);
+  // deck.gl : le setStyle a détruit la couche interleaved → on la repose avec la palette du thème.
+  if (is3D && window.Deck3D) {
+    Deck3D.refreshPalette();
+    if (Deck3D.isActive()) map.setLayoutProperty("communes-3d", "visibility", "none");
+  }
 }
 function applyTheme(theme) {
   const dark = theme === "dark";
@@ -969,15 +977,28 @@ document.getElementById("themeBtn").addEventListener("click", () => {
   applyTheme(themeNow() === "dark" ? "light" : "dark");
 });
 
-// --- B1 : vue 3D « montagnes de pression » (fill-extrusion, toggle 2D/3D + pitch). ---
+// --- B1/B-deck : vue 3D « montagnes de pression ». La 3D `fill-extrusion` MapLibre s'affiche
+// INSTANTANÉMENT (repli), puis deck.gl prend la main dès qu'il est chargé (élévation continue +
+// morph GPU couleur/hauteur). Si deck échoue à charger, la 3D MapLibre reste (repli gracieux). ---
 function toggle3D() {
   is3D = !is3D;
+  // Repli immédiat : extrusion MapLibre visible en 3D (deck la masquera quand il prendra la main).
   map.setLayoutProperty("communes-3d", "visibility", is3D ? "visible" : "none");
   map.setLayoutProperty("communes-fill", "visibility", is3D ? "none" : "visible");
   map.easeTo({ pitch: is3D ? 50 : 0, duration: 600 });
   const b = document.getElementById("d3Btn");
   b.classList.toggle("on", is3D);
   b.setAttribute("aria-pressed", String(is3D));
+  if (window.Deck3D) {
+    if (is3D) {
+      // deck prend la main quand il est prêt → on masque alors l'extrusion MapLibre (évite le double).
+      Deck3D.enable(idx, () => {
+        if (is3D) map.setLayoutProperty("communes-3d", "visibility", "none");
+      });
+    } else {
+      Deck3D.disable();
+    }
+  }
   if (MONTHS.length) paintMonth(idx); // applique couleur + hauteur du mois courant
 }
 document.getElementById("d3Btn").addEventListener("click", toggle3D);
