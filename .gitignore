@@ -7,6 +7,8 @@ tiles/out/
 front/communes-index.json
 # Glyphs PBF du fond vectoriel : artefact binaire ~13 Mo (make glyphs), couverture Noto Sans complète.
 front/glyphs/
+# Bundle deck.gl UMD self-hosté (make vendor-deck) — vendored ~1,5 Mo, non versionné (re-téléchargé sur la VM).
+front/vendor/
 
 # Outils locaux (binaire go-pmtiles, node_modules du générateur de basemap) — non versionnés.
 .tools/
