@@ -5,9 +5,11 @@
 set -euo pipefail
 cd "${SOLVEILLE_REPO:-/opt/solveille}"
 export PATH="/usr/local/bin:${HOME:-/root}/.local/bin:$PATH"
+# Déployé en `solveille` (non-root) : sudo n'autorise que ce restart (/etc/sudoers.d/deploy-solveille).
+SUDO=""; [ "$(id -u)" = 0 ] || SUDO="sudo -n"
 
 uv sync --locked
-systemctl restart solveille-api
+$SUDO systemctl restart solveille-api
 sleep 2
 if systemctl is-active --quiet solveille-api; then
   echo "solveille-api: actif ✓"

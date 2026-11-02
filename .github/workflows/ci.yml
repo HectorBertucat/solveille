@@ -37,7 +37,16 @@ jobs:
       group: deploy-prod
       cancel-in-progress: false
     steps:
-      - name: Configurer SSH (clé + known_hosts depuis les secrets)
+      # Le port 22 d'atreides n'est plus public : le runner rejoint le tailnet (nœud éphémère
+      # tag:ci, qui n'a accès qu'à atreides:22) et déploie en `solveille` (non-root).
+      - name: Rejoindre le tailnet (tag:ci)
+        uses: tailscale/github-action@064b10558093f38325e838ddea35486bdc6b1d5c # v4.4.0
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+          ping: ${{ secrets.DEPLOY_HOST }}
+      - name: Configurer SSH (clé + known_hosts épinglé, depuis les secrets)
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           DEPLOY_KNOWN_HOSTS: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
@@ -51,6 +60,6 @@ jobs:
           DEPLOY_USER: ${{ secrets.DEPLOY_USER }}
           DEPLOY_HOST: ${{ secrets.DEPLOY_HOST }}
         run: |
-          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes \
+          ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
             "$DEPLOY_USER@$DEPLOY_HOST" \
             'set -e; cd /opt/solveille && git fetch --depth=1 origin main && git reset --hard origin/main && bash deploy/server-deploy.sh'

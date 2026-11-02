@@ -5,7 +5,8 @@ After=network.target
 
 [Service]
 Type=simple
-User=root
+User=solveille
+Group=solveille
 WorkingDirectory=/opt/solveille
 Environment=PYTHONUNBUFFERED=1
 Environment=SOLVEILLE_DATA_DIR=/opt/solveille/data

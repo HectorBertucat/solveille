@@ -113,13 +113,15 @@ FastAPI) doit toujours traverser.
 
 | Secret | Valeur |
 |---|---|
-| `DEPLOY_SSH_KEY` | clé privée **dédiée** au déploiement (ed25519, sans passphrase) ; sa clé publique est dans `~/.ssh/authorized_keys` de la VM |
-| `DEPLOY_HOST` | IP/host de la VM |
-| `DEPLOY_USER` | `root` |
-| `DEPLOY_KNOWN_HOSTS` | sortie de `ssh-keyscan -t ed25519 <host>` (épingle l'empreinte serveur) |
+| `DEPLOY_SSH_KEY` | clé privée **dédiée** au déploiement (ed25519, sans passphrase) ; sa clé publique est dans `/opt/solveille/.ssh/authorized_keys`, restreinte `restrict,from=` aux IP du tailnet |
+| `DEPLOY_HOST` | `100.71.24.59` (IP Tailscale d'atreides : le port 22 public est fermé) |
+| `DEPLOY_USER` | `solveille` (non-root ; sudo limité à `systemctl restart solveille-api`) |
+| `DEPLOY_KNOWN_HOSTS` | clé hôte ed25519 d'atreides, épinglée (relevée sur le serveur, pas par `ssh-keyscan`) |
+| `TS_OAUTH_CLIENT_ID`, `TS_OAUTH_SECRET` | client OAuth Tailscale (tag `tag:ci`, qui n'a accès qu'à `atreides:22`) |
 
-Sur push `main` : la CI lance lint+types+tests, puis (si vert) le job `deploy` se connecte en SSH,
-fait `git reset --hard origin/main` + `uv sync --locked` + `systemctl restart solveille-api`
+Sur push `main` : la CI lance lint+types+tests, puis (si vert) le job `deploy` rejoint le tailnet
+(`tailscale/github-action`) et se connecte en SSH (utilisateur `solveille`),
+fait `git reset --hard origin/main` + `uv sync --locked` + `sudo systemctl restart solveille-api`
 (`deploy/server-deploy.sh`). **Le déploiement ne rebuild pas les données** — c'est le rôle des timers.
 Un changement de schéma de mart nécessite un refresh manuel après déploiement (l'API est **tolérante
 au schéma** → pas de 500 entre-temps, juste les nouvelles colonnes à NULL). Pour **peupler `H` (v2)**
