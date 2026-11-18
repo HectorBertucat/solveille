@@ -9,9 +9,10 @@ filtrage sécheresse (`lib_risque_jo='Sécheresse'`) vit dans le staging
 Schéma `catnat_gaspar.csv` (`;`, UTF-8, dates ISO `YYYY-MM-DD HH:MM:SS`), depuis 2026 :
 `id_gaspar;code_commune;libelle_commune;num_risque_jo;lib_risque_jo;date_debut;date_fin;date_signature_arrete;date_publication_jo;date_modification`
 (avant : `cod_nat_catnat;cod_commune;lib_commune;…;dat_deb;dat_fin;dat_pub_arrete;dat_pub_jo;`
-`dat_maj`, mêmes colonnes dans le même ordre ; le staging lit les deux). Clé commune =
-`code_commune` (INSEE, **texte** : zéros, Corse 2A/2B). `last_updated_gaspar` = `last_modified` de la
-ressource. Cf. ADR-019, `docs/data-sources.md §6`.
+`dat_maj`, mêmes colonnes dans le même ordre ; le staging lit les deux).
+Clé commune = `code_commune` (INSEE, **texte** : zéros, Corse 2A/2B).
+`last_updated_gaspar` = `last_modified` de la ressource. Cf. ADR-019,
+`docs/data-sources.md §6`.
 
 Depuis l'automne 2026 le membre de l'archive est **daté** (`catnat_gaspar_2026-11-02.csv`) :
 on le retrouve par motif et on le range sous le nom stable `catnat_gaspar.csv`.
