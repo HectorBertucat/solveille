@@ -591,6 +591,40 @@ def build_swi_anomalie(
     return out
 
 
+#: Colonnes de `catnat_gaspar.csv` lues par le staging : nom interne → en-têtes acceptés. GASPAR
+#: a renommé ses colonnes en 2026 (mêmes champs, même ordre) ; l'ancien schéma reste lisible.
+_CATNAT_COLUMNS: dict[str, tuple[str, ...]] = {
+    "code_insee": ("code_commune", "cod_commune"),
+    "cod_nat_catnat": ("id_gaspar", "cod_nat_catnat"),
+    "num_risque_jo": ("num_risque_jo",),
+    "lib_risque_jo": ("lib_risque_jo",),
+    "dat_deb": ("date_debut", "dat_deb"),
+    "dat_fin": ("date_fin", "dat_fin"),
+    "dat_pub_arrete": ("date_signature_arrete", "dat_pub_arrete"),
+}
+
+
+def _catnat_columns(con: duckdb.DuckDBPyConnection, raw_csv: Path) -> dict[str, str]:
+    """En-tête réel de chaque colonne attendue ; erreur explicite si le schéma a encore changé."""
+    present = {
+        str(r[0])
+        for r in con.execute(
+            f"""DESCRIBE SELECT * FROM read_csv('{raw_csv}', delim = ';', header = true,
+                                                all_varchar = true)"""
+        ).fetchall()
+    }
+    cols: dict[str, str] = {}
+    for name, accepted in _CATNAT_COLUMNS.items():
+        hit = next((a for a in accepted if a in present), None)
+        if hit is None:
+            raise ValueError(
+                f"Schéma GASPAR inattendu dans {raw_csv.name} : aucune des colonnes {accepted} "
+                f"(pour `{name}`) parmi {sorted(present)}. Adapter `_CATNAT_COLUMNS`."
+            )
+        cols[name] = hit
+    return cols
+
+
 def build_catnat_secheresse(
     con: duckdb.DuckDBPyConnection | None = None,
     *,
@@ -602,7 +636,8 @@ def build_catnat_secheresse(
     """Construit `data/staging/catnat_secheresse.parquet` : arrêtés Cat-Nat **sécheresse**
     agrégés **par commune** (fréquence, premier/dernier arrêté, années, évènements).
 
-    Lit `catnat_gaspar.csv` (`;`, UTF-8, dates ISO), **filtre `lib_risque_jo='Sécheresse'`**
+    Lit `catnat_gaspar.csv` (`;`, UTF-8, dates ISO ; en-têtes de 2026 ou antérieurs, cf.
+    `_CATNAT_COLUMNS`), **filtre `lib_risque_jo='Sécheresse'`**
     (insensible casse/accents par robustesse), **déduplique** (commune × arrêté) sur
     `cod_nat_catnat` (un arrêté couvre N communes + correctifs), borne aux départements
     configurés (dept dérivé de l'INSEE), et **trace** le taux de communes orphelines vs le
@@ -630,17 +665,18 @@ def build_catnat_secheresse(
     try:
         # Lecture unique du CSV → table temp (sécheresse seule, INSEE/dates typés). Le
         # bornage département (sur `code_insee` dérivé) s'applique ensuite à l'agrégat.
+        c = _catnat_columns(con, raw_csv)
         con.execute(
             f"""
             CREATE OR REPLACE TEMP TABLE _catnat_src AS
-            SELECT cod_commune::VARCHAR                       AS code_insee,
-                   cod_nat_catnat::VARCHAR                    AS cod_nat_catnat,
-                   num_risque_jo::VARCHAR                     AS num_risque_jo,
-                   TRY_CAST(dat_deb AS TIMESTAMP)::DATE        AS dat_deb,
-                   TRY_CAST(dat_fin AS TIMESTAMP)::DATE        AS dat_fin,
-                   TRY_CAST(dat_pub_arrete AS TIMESTAMP)::DATE AS dat_pub_arrete
+            SELECT "{c["code_insee"]}"::VARCHAR                        AS code_insee,
+                   "{c["cod_nat_catnat"]}"::VARCHAR                    AS cod_nat_catnat,
+                   "{c["num_risque_jo"]}"::VARCHAR                     AS num_risque_jo,
+                   TRY_CAST("{c["dat_deb"]}" AS TIMESTAMP)::DATE        AS dat_deb,
+                   TRY_CAST("{c["dat_fin"]}" AS TIMESTAMP)::DATE        AS dat_fin,
+                   TRY_CAST("{c["dat_pub_arrete"]}" AS TIMESTAMP)::DATE AS dat_pub_arrete
             FROM read_csv('{raw_csv}', delim = ';', header = true, all_varchar = true)
-            WHERE lower(strip_accents(lib_risque_jo)) = 'secheresse';
+            WHERE lower(strip_accents("{c["lib_risque_jo"]}")) = 'secheresse';
             """
         )
         con.execute(
