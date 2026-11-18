@@ -214,3 +214,37 @@ def test_brut_absent_leve(tmp_path: Path) -> None:
         staging.build_catnat_secheresse(
             raw_csv=tmp_path / "absent.csv", out=tmp_path / "o.parquet", departements=[]
         )
+
+
+# --- schéma GASPAR 2026 (en-têtes renommés, mêmes champs dans le même ordre) --------------
+
+_HEADER_2026 = (
+    "id_gaspar;code_commune;libelle_commune;num_risque_jo;lib_risque_jo;"
+    "date_debut;date_fin;date_signature_arrete;date_publication_jo;date_modification"
+)
+
+
+def test_schema_2026_meme_resultat(gaspar_csv: Path, tmp_path: Path) -> None:
+    ancien = _build(gaspar_csv, tmp_path)
+    cols = "code_insee, catnat_freq, premier_arrete, dernier_arrete, annees_reco, evenements"
+    attendu = _rows(ancien, cols)
+
+    nouveau_csv = tmp_path / "nouveau" / "catnat_gaspar.csv"
+    nouveau_csv.parent.mkdir()
+    nouveau_csv.write_text(
+        _HEADER_2026 + "\r\n" + "".join(";".join(r) + "\r\n" for r in _ROWS), encoding="utf-8"
+    )
+    nouveau = staging.build_catnat_secheresse(
+        raw_csv=nouveau_csv,
+        out=tmp_path / "nouveau" / "catnat_secheresse.parquet",
+        commune_parquet=tmp_path / "_nocommune.parquet",
+        departements=[],
+    )
+    assert _rows(nouveau, cols) == attendu
+
+
+def test_schema_inconnu_erreur_explicite(tmp_path: Path) -> None:
+    p = tmp_path / "catnat_gaspar.csv"
+    p.write_text("identifiant;commune;risque\nA;31555;Sécheresse\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="Schéma GASPAR inattendu"):
+        _build(p, tmp_path)

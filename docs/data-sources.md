@@ -52,7 +52,11 @@ Règles communes : reprojeter en **EPSG:2154** dès l'ingestion ; écrire le **b
   `catnat_gaspar.csv`** (l'extrait CATNAT national, ~34 Mo, **tous aléas** : 260 799 lignes). GET
   conditionnel (ETag), idempotent. `last_updated_gaspar` = `last_modified` ressource. Connecteur
   `ingest/gaspar.py` ; cadence **hebdomadaire**.
-- **Schéma `catnat_gaspar.csv`** (`;`, UTF-8, dates ISO `YYYY-MM-DD HH:MM:SS`) :
+- **Schéma `catnat_gaspar.csv`** (`;`, UTF-8, dates ISO `YYYY-MM-DD HH:MM:SS`) — **en-têtes renommés par GASPAR
+  en 2026** : `id_gaspar;code_commune;libelle_commune;num_risque_jo;lib_risque_jo;date_debut;date_fin;date_signature_arrete;date_publication_jo;date_modification`
+  (mêmes champs, même ordre), et membre de l'archive **daté** (`catnat_gaspar_AAAA-MM-JJ.csv`,
+  rangé sous le nom stable `catnat_gaspar.csv`). Le staging lit les deux schémas
+  (`staging._CATNAT_COLUMNS`). Schéma d'origine, auquel renvoient les noms ci-dessous :
   `cod_nat_catnat;cod_commune;lib_commune;num_risque_jo;lib_risque_jo;dat_deb;dat_fin;dat_pub_arrete;dat_pub_jo;dat_maj`.
   - `cod_commune` = **INSEE** (texte : zéros, Corse 2A/2B — **ne jamais caster en int**) ; clé de jointure.
   - `num_risque_jo` = **code mnémonique texte** (`SEC`, `ICB`, `MVT`, `TMP`…), **pas un entier**
